@@ -23,6 +23,7 @@ dependencies = [
   "rich",
   "pillow",
   "tqdm",
+  "rich"
 ]
 dynamic = ["version"]
 
