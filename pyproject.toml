@@ -23,7 +23,10 @@ dependencies = [
   "rich",
   "pillow",
   "tqdm",
-  "rich"
+  "rich",
+  "opencv-python",
+  "nnunetv2",
+  "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
 ]
 dynamic = ["version"]
 
