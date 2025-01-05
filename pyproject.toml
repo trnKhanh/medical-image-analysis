@@ -4,34 +4,36 @@ version = "1.0"
 description = "Fetal Ultrasound grand challenge"
 authors = [{ name = "Phu Phan Le Dac", email="phanledacphu2204@outlook.com" }]
 license = "MIT"
+dependencies = [
+    "requests~=2.25.1",
+    "torch~=2.5.0",
+    "numpy~=2.1.0",
+    "pillow~=11.1.0",
+    "touchvision~=0.20.1",
+    "monai~=1.4.0",
+    "click~=8.1.8",
+    "jupyter~=1.1.1",
+    "opencv-python~=4.10.0.84",
+
+    # Dev dependencies
+    "pytest~=8.3.3",
+    "isort~=5.13.2",
+    "black~=24.10.0",
+    "pylint~=3.3.1",
+    "mypy~=1.12.1"
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry]
-name = "fetal-ultrasound-grand-challenge"
-version = "1.0"
-description = "My project"
-authors = ["Phu Phan Le Dac"]
-license = "MIT"
+[tool.setuptools.dynamic]
+version = { attr = "info.VERSION" }
 
-[tool.poetry.dependencies]
-requests = "^2.25.1"
-torch = "~2.5.0"
-numpy = "~2.1.0"
-pillow = "~11.1.0"
-touchvision = "~0.20.1"
-monai = "~1.4.0"
-click = "~8.1.8"
-jupyter = "~1.1.1"
+[project.scripts]
+dataset = "dataset.__main__:cli.main"
+model = "model.__main__:cli.main"
 
-[tool.poetry.dev-dependencies]
-pytest = "~8.3.3"
-isort = "~5.13.2"
-black = "~24.10.0"
-pylint = "~3.3.1"
-mypy = "~1.12.1"
+[tool.setuptools.packages.find]
+where = ["source"]
 
-[tool.poetry.scripts]
-myproject = 'image-super-resolution:main'
