@@ -1,10 +1,12 @@
 """Package's entry point"""
 
-import dataset.cli
+import model.cli
+
 
 def main():
     """A wrapper of CLI's entry point."""
-    dataset.cli.main()
+    model.cli.main()
+
 
 if __name__ == '__main__':
     main()

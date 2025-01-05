@@ -30,8 +30,9 @@ build-backend = "setuptools.build_meta"
 version = { attr = "info.VERSION" }
 
 [project.scripts]
-dataset = "dataset.__main__:cli.main"
-model = "model.__main__:cli.main"
+dataset = "dataset.__main__:main"
+model = "model.__main__:main"
+visualize = "visualize.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["source"]
