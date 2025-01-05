@@ -3,8 +3,8 @@ name = "fetal-ultrasound-grand-challenge"
 version = "1.0"
 description = "Fetal Ultrasound grand challenge"
 authors = [
-    { name = "Nam-Khanh Tran", email="21120015@student.hcmus.edu.vn" },
-    { name = "Dac-Phu Phan Le", email="21120111@student.hcmus.edu.vn" }
+    { name = "Nam-Khanh Tran", email = "21120015@student.hcmus.edu.vn" },
+    { name = "Dac-Phu Phan Le", email = "21120111@student.hcmus.edu.vn" }
 ]
 license = { text = "MIT" }
 dependencies = [

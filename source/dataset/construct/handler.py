@@ -17,7 +17,7 @@ class BaseHandler:
         :return:
         """
 
-        labeled_data_folder = os.path.join("dataset", "train", "labeled_data")
+        labeled_data_folder = os.path.join("assets", "dataset", "train", "labeled_data")
         self.raw_images_path = os.path.join(labeled_data_folder, "images")
         self.mask_images_path = os.path.join(labeled_data_folder, "labels")
         self.target_images_path = os.path.join(labeled_data_folder, "targets")
