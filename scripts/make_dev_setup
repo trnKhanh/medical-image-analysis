@@ -11,10 +11,10 @@ SCRIPT_PATH="$(readlink -f "$0")"                             # Path of this scr
 SCRIPTS_DIRECTORY="$(dirname "$SCRIPT_PATH")"                 # Path of the script's parent directory
 ROOT_DIRECTORY="$(dirname "$SCRIPTS_DIRECTORY")"              # Path of the project's root directory
 PYTHON_REQUIREMENTS_DIRECTORY="$ROOT_DIRECTORY/requirements"  # Path to directory containing additional requirement.txt files
-PYTHON_MINIMUM_VERSION="3.13.0"                               # Minimum Python's version
+PYTHON_MINIMUM_VERSION="3.12.0"                               # Minimum Python's version
 
 # Variables
-PYTHON_INTERPRETER="python3.13"                   # Which Python interpreter to use in this script
+PYTHON_INTERPRETER="python3.12"                   # Which Python interpreter to use in this script
 PYTHON_VENV_DIRECTORY="$ROOT_DIRECTORY/.venv"     # Path to Python virtual environment
 PYTHON_VENV_OVERWRITE=false                       # Whether to overwrite Python virtual environment if
 NO_PROMPT=false                                   # Whether to prompt user for input
