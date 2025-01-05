@@ -2,7 +2,6 @@ import os.path
 import numpy as np
 from torch.utils.data import Dataset
 import SimpleITK as sitk
-import cv2
 
 
 def correct_dims(*images):
