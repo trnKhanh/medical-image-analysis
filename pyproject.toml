@@ -19,7 +19,6 @@ dependencies = [
   "torchvision",
   "numpy<2",
   "monai", 
-  "jupyter",
   "rich",
   "pillow",
   "tqdm",
@@ -38,6 +37,7 @@ namespaces = true
 
 [project.scripts]
 mia = "cli:__main__.main"
+mia_train = "entry.train:train_entry"
 
 [tool.setuptools_scm]
 
