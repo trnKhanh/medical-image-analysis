@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument("--start-lr", default=1e-3, type=float)
     parser.add_argument("--oversample", default=1, type=int)
     parser.add_argument("--no-augment", action="store_true")
+    parser.add_argument("--no-normalization", action="store_true")
 
     return parser.parse_args()
 
@@ -38,6 +39,7 @@ def train_entry():
         start_lr=args.start_lr,
         data_oversample=args.oversample,
         data_augment=not args.no_augment,
+        data_normalize=not args.no_normalization,
     )
     trainer.initialize()
 

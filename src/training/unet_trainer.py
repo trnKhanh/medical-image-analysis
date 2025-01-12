@@ -64,6 +64,7 @@ class UNetTrainer(BaseTrainer):
         data_valid_rate: float = 0.0,
         data_oversample: int = 10,
         data_augment: bool = True,
+        data_normalize: bool = True,
         batch_size: int = 32,
         num_workers: int = 1,
         pin_memory: bool = False,
@@ -102,6 +103,7 @@ class UNetTrainer(BaseTrainer):
         self.data_valid_rate = data_valid_rate
         self.data_oversample = data_oversample
         self.data_augment = data_augment
+        self.data_normalize = data_normalize
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -304,13 +306,19 @@ class UNetTrainer(BaseTrainer):
         return ComposeTransform(transforms)
 
     def _get_train_normalize(self):
-        return ZScoreNormalize()
+        if self.data_normalize:
+            return ZScoreNormalize()
+        else:
+            return None
 
     def _get_valid_transform(self):
         pass
 
     def _get_valid_normalize(self):
-        return ZScoreNormalize()
+        if self.data_normalize:
+            return ZScoreNormalize()
+        else:
+            return None
 
     def _get_random_split_dict(
         self,
@@ -416,6 +424,7 @@ class UNetTrainer(BaseTrainer):
         self.logger.info(f"  valid_samples: {len(self.valid_dataset)}")
         self.logger.info(f"  oversample: {self.data_oversample}")
         self.logger.info(f"  augment: {self.data_augment}")
+        self.logger.info(f"  normalize: {self.data_normalize}")
         self.logger.info(f"  batch_size: {self.batch_size}")
         self.logger.info(f"  num_workers: {self.num_workers}")
         self.logger.info(f"  pin_memory: {self.pin_memory}")
