@@ -284,21 +284,21 @@ class UNetTrainer(BaseTrainer):
             return None
 
         transforms = []
-        transforms.append(
-            RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
-        )
-        transforms.append(
-            RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
-        )
+        # transforms.append(
+        #     RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
+        # )
+        # transforms.append(
+        #     RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
+        # )
         transforms.append(
             RandomTransform(RandomBrightness(brightness=0.25), p=0.15)
         )
         transforms.append(
             RandomTransform(RandomContrast(contrast=0.25), p=0.15)
         )
-        transforms.append(
-            RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
-        )
+        # transforms.append(
+        #     RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
+        # )
         transforms.append(RandomTransform(RandomGamma(gamma=(0.7, 1.5)), p=0.1))
 
         return ComposeTransform(transforms)
