@@ -38,7 +38,7 @@ Time created: 20:34
 - Size: $<100$ MB.
 
 ### FUGC samples
-![FUGC samples](attachments/FUGC_samples.jpg)
+![FUGC samples](attachments/30-Dec-2024/FUGC_samples.jpg)
 
 ### Comments
 - From our observation, the dataset has a very high inter-sample variance in the object size, colour, appearence. However, there is consistency in the position of objects (which makes sense), which could be the main feature to classify the objects.
@@ -57,29 +57,29 @@ Time created: 20:34
 - As a result, we try finetuning the model in two different ways:
 
 #### No finetuning
-![No finetuning](attachments/MedSAM.png)
+![No finetuning](attachments/30-Dec-2024/MedSAM.png)
 
 #### Whole model finetuning
 - We observe the decrease in performance. It could be because the data is too little to finetune the whole model (which has arround 100 milions parameters).
-![Whole model finetuning](attachments/MedSAM_whole.png)
+![Whole model finetuning](attachments/30-Dec-2024/MedSAM_whole.png)
 
 #### Decoder only finetuning
 - There is decent increase in train set performance, but it still remains relatively poor for the unlabeled data.
-![Decoder only finetuning 0](attachments/MedSAM_decoder_0.png)
-![Decoder only finetuning 1](attachments/MedSAM_decoder_1.png)
+![Decoder only finetuning 0](attachments/30-Dec-2024/MedSAM_decoder_0.png)
+![Decoder only finetuning 1](attachments/30-Dec-2024/MedSAM_decoder_1.png)
 
 ### nnUNet
 
 #### Train prediction
 - We could see that nnUNet could fit to the training data quite well.
-![Train prediction](attachments/FUGC_train_prediction.jpg)
+![Train prediction](attachments/30-Dec-2024/FUGC_train_prediction.jpg)
 
 #### Test prediction
 - For test (unlabeled data), we could see that nnUNet could capture the meaning of the samples to some extents. In most samples, the coarse masks are decent, but the boundary and details are quite bad. 
 - In some samples, the masks are not continuous. The boundary of the objects is wrong. However, more inspection is needed as we are not even sure whether the masks are correct or not.
 - In unlabeled data, we could see that the inter-sample invariance is even higher.
 - In most cases, ensembling multiple models (from multiple folds) achieve better qualitative results.
-![Test prediction](attachments/FUGC_test_prediction.jpg)
+![Test prediction](attachments/30-Dec-2024/FUGC_test_prediction.jpg)
 
 # Conclusion
 - We have investigated the FUGC 2025 dataset and observe several challenges of it:
@@ -97,6 +97,5 @@ Time created: 20:34
 	- Semi-supervised methods: what is some current methods:
 		- We know that SAM and DINO pipeline is semi-supervised, what could we learn from them?
 		- Are there SOTA pipelines for semi-supervised?
-
 
 
