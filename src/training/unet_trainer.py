@@ -2,14 +2,14 @@ import os
 import shutil
 from datetime import datetime
 import json
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Sequence
 import logging
 import time
 from pathlib import Path
 
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 from torch.optim import Optimizer
 import torchvision.transforms.functional as F
 
@@ -39,13 +39,13 @@ from transforms.image_transform import (
     SimulateLowRes,
 )
 from transforms.joint_transform import (
+    JointResize,
     RandomRotation,
     RandomAffine,
     RandomCrop2D,
     MirrorTransform,
 )
 from transforms.common import RandomTransform, ComposeTransform
-
 
 
 class UNetTrainer(BaseTrainer):
@@ -55,9 +55,10 @@ class UNetTrainer(BaseTrainer):
         device: torch.device | str = torch.device("cuda"),
         seed: int = 12345,
         # Model parameters
+        image_size: int | tuple[int, int] | None = None,
         pretrained_model: Path | str | None = None,
         # Data parameters
-        data_path: Path | str = "data",
+        data_path: Path | str | list[Path] | list[str] = "data",
         data_split_dicts: Path | str | dict | None = None,
         data_num_folds: int | None = None,
         data_fold: int | str | None = None,
@@ -92,10 +93,13 @@ class UNetTrainer(BaseTrainer):
         torch.manual_seed(self.seed)
 
         # >>> Model parameters
+        self.image_size = image_size
         self.pretrained_model = pretrained_model
         # <<< Model parameters
 
         # >>> Data parameters
+        if not isinstance(data_path, list):
+            data_path = [get_path(data_path)]
         self.data_path = data_path
         self.data_split_dicts = data_split_dicts
         self.data_num_folds = data_num_folds
@@ -196,12 +200,13 @@ class UNetTrainer(BaseTrainer):
     def _setup_split_dict(self):
         self.cur_split_dict_id = 0
         default_split_dict_path = self.work_path / "split_dicts.json"
-        if self.data_split_dicts is None and default_split_dict_path.is_file():
-            self.data_split_dicts = default_split_dict_path
 
-        if isinstance(self.data_split_dicts, (str, Path)):
-            with open(self.data_split_dicts, "r") as f:
-                self.data_split_dicts = json.load(f)
+        try:
+            if isinstance(self.data_split_dicts, (str, Path)):
+                with open(self.data_split_dicts, "r") as f:
+                    self.data_split_dicts = json.load(f)
+        except:
+            self.data_split_dicts = None
 
         if self.data_split_dicts:
             if not isinstance(self.data_split_dicts, list):
@@ -227,10 +232,11 @@ class UNetTrainer(BaseTrainer):
         ), "split_dicts must be a list"
 
         for id, split_dict in enumerate(self.data_split_dicts):
-            samples = set(split_dict["train"] + split_dict["valid"])
-            assert len(samples) == len(split_dict["train"]) + len(
-                split_dict["valid"]
-            ), f"data leaking in fold {id}"
+            for subset in split_dict.values():
+                samples = set(subset["train"] + subset["valid"])
+                assert len(samples) == len(subset["train"]) + len(
+                    subset["valid"]
+                ), f"data leaking in fold {id}"
 
     def _setup_seed(self, seed: int):
         torch.manual_seed(seed)
@@ -241,15 +247,20 @@ class UNetTrainer(BaseTrainer):
         ), "data_split_dict is not initialized"
         split_dict = self.data_split_dicts[id]
 
-        train_dataset = FUGCDataset(
-            data_path=self.data_path,
-            transform=self._get_train_transform(),
-            normalize=self._get_train_normalize(),
-            split="train",
-            split_dict=split_dict,
-            logger=self.logger,
-            oversample=self.data_oversample,
-        )
+        train_datasets = []
+        for data_path in self.data_path:
+            train_datasets.append(
+                FUGCDataset(
+                    data_path=data_path,
+                    transform=self._get_train_transform(),
+                    normalize=self._get_train_normalize(),
+                    split="train",
+                    split_dict=split_dict[str(data_path)],
+                    logger=self.logger,
+                    oversample=self.data_oversample,
+                )
+            )
+        train_dataset = ConcatDataset(train_datasets)
 
         train_dataloader = DataLoader(
             dataset=train_dataset,
@@ -260,15 +271,20 @@ class UNetTrainer(BaseTrainer):
             pin_memory=self.pin_memory,
         )
 
-        valid_dataset = FUGCDataset(
-            data_path=self.data_path,
-            transform=self._get_valid_transform(),
-            normalize=self._get_valid_normalize(),
-            split="valid",
-            split_dict=split_dict,
-            logger=self.logger,
-            oversample=self.data_oversample,
-        )
+        valid_datasets = []
+        for data_path in self.data_path:
+            valid_datasets.append(
+                FUGCDataset(
+                    data_path=data_path,
+                    transform=self._get_valid_transform(),
+                    normalize=self._get_valid_normalize(),
+                    split="valid",
+                    split_dict=split_dict[str(data_path)],
+                    logger=self.logger,
+                    oversample=self.data_oversample,
+                )
+            )
+        valid_dataset = ConcatDataset(valid_datasets)
 
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
@@ -282,38 +298,35 @@ class UNetTrainer(BaseTrainer):
         return train_dataloader, valid_dataloader, train_dataset, valid_dataset
 
     def _get_train_transform(self):
-        if not self.data_augment:
-            return None
-
         transforms = []
-        transforms.append(
-            RandomTransform(
-                RandomAffine(scale=(0.7, 1.4)),
-                p=0.2
+        if self.data_augment:
+            transforms.append(
+                RandomTransform(RandomAffine(scale=(0.7, 1.4)), p=0.2)
             )
-        )
-        transforms.append(
-            RandomTransform(
-                RandomAffine(degrees=(-15, 15)),
-                p=0.2
+            transforms.append(
+                RandomTransform(RandomAffine(degrees=(-15, 15)), p=0.2)
             )
-        )
-        transforms.append(
-            RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
-        )
-        transforms.append(
-            RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
-        )
-        transforms.append(
-            RandomTransform(RandomBrightness(brightness=0.25), p=0.15)
-        )
-        transforms.append(
-            RandomTransform(RandomContrast(contrast=0.25), p=0.15)
-        )
-        transforms.append(
-            RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
-        )
-        transforms.append(RandomTransform(RandomGamma(gamma=(0.7, 1.5)), p=0.1))
+            transforms.append(
+                RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
+            )
+            transforms.append(
+                RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
+            )
+            transforms.append(
+                RandomTransform(RandomBrightness(brightness=0.25), p=0.15)
+            )
+            transforms.append(
+                RandomTransform(RandomContrast(contrast=0.25), p=0.15)
+            )
+            transforms.append(
+                RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
+            )
+            transforms.append(
+                RandomTransform(RandomGamma(gamma=(0.7, 1.5)), p=0.1)
+            )
+
+        if self.image_size:
+            transforms.append(JointResize(self.image_size))
 
         return ComposeTransform(transforms)
 
@@ -324,7 +337,10 @@ class UNetTrainer(BaseTrainer):
             return None
 
     def _get_valid_transform(self):
-        pass
+        transforms = []
+        if self.image_size:
+            transforms.append(JointResize(self.image_size))
+        return ComposeTransform(transforms)
 
     def _get_valid_normalize(self):
         if self.data_normalize:
@@ -339,22 +355,27 @@ class UNetTrainer(BaseTrainer):
         assert (
             valid_rate >= 0
         ), f"valid_rate must be a non-negative float (>=0). Found {valid_rate}"
-        samples = []
-        samples.extend(FUGCDataset.get_samples(self.data_path))
+        split_dicts = {}
+        for data_path in self.data_path:
+            self.logger.info(f"Setting up split dict for {str(data_path)}")
+            split_dict = {"train": [], "valid": []}
+            samples = []
+            samples.extend(FUGCDataset.get_samples(data_path))
 
-        perm_ids = torch.randperm(len(samples))
-        split_dict = {"train": [], "valid": []}
+            perm_ids = torch.randperm(len(samples))
 
-        valid_size = int(len(samples) * valid_rate)
-        valid_ids = perm_ids[:valid_size]
+            valid_size = int(len(samples) * valid_rate)
+            valid_ids = perm_ids[:valid_size]
 
-        for sample_id in range(len(samples)):
-            if sample_id in valid_ids:
-                split_dict["valid"].append(samples[sample_id])
-            else:
-                split_dict["train"].append(samples[sample_id])
+            for sample_id in range(len(samples)):
+                if sample_id in valid_ids:
+                    split_dict["valid"].append(samples[sample_id])
+                else:
+                    split_dict["train"].append(samples[sample_id])
 
-        return split_dict
+            split_dicts[str(data_path)] = split_dict
+
+        return split_dicts
 
     def _get_cross_split_dicts(
         self,
@@ -363,23 +384,27 @@ class UNetTrainer(BaseTrainer):
         assert (
             num_folds >= 2
         ), f"num_folds must be a postive integer >= 2. Found {num_folds}"
-        samples = []
-        samples.extend(FUGCDataset.get_samples(self.data_path))
+        split_dicts = [{} for _ in range(num_folds)]
+        for data_path in self.data_path:
+            self.logger.info(f"Setting up split dict for {str(data_path)}")
+            samples = []
+            samples.extend(FUGCDataset.get_samples(data_path))
 
-        perm_ids = torch.randperm(len(samples))
-        split_dicts = [{"train": [], "valid": []} for _ in range(num_folds)]
-        samples_per_split = int(len(samples) / num_folds)
+            perm_ids = torch.randperm(len(samples))
+            samples_per_split = int(len(samples) / num_folds)
 
-        for i in range(num_folds):
-            start_id = i * samples_per_split
-            end_id = (i + 1) * samples_per_split
-            valid_ids = perm_ids[start_id:end_id]
+            for i in range(num_folds):
+                split_dict = {"train": [], "valid": []}
+                start_id = i * samples_per_split
+                end_id = (i + 1) * samples_per_split
+                valid_ids = perm_ids[start_id:end_id]
 
-            for sample_id in range(len(samples)):
-                if sample_id in valid_ids:
-                    split_dicts[i]["valid"].append(samples[sample_id])
-                else:
-                    split_dicts[i]["train"].append(samples[sample_id])
+                for sample_id in range(len(samples)):
+                    if sample_id in valid_ids:
+                        split_dict["valid"].append(samples[sample_id])
+                    else:
+                        split_dict["train"].append(samples[sample_id])
+                split_dicts[i][str(data_path)] = split_dict
         return split_dicts
 
     def _get_optimizer(
@@ -398,7 +423,7 @@ class UNetTrainer(BaseTrainer):
 
         if lr_scheduler == "poly":
             _lr_scheduler = PolyLRScheduler(
-                _optimizer, self.start_lr, self.num_epochs
+                _optimizer, self.start_lr, self.num_epochs, self.warmup_steps
             )
         else:
             raise ValueError(
@@ -426,6 +451,10 @@ class UNetTrainer(BaseTrainer):
         self.logger.info(f"num_epochs: {self.num_epochs}")
         self.logger.info(f'log_file: "{self.log_path}"')
 
+        self.logger.info(f"model: {self.model}")
+        self.logger.info(f"  pretrained_model: {self.pretrained_model}")
+        self.logger.info(f"  image_size: {self.image_size}")
+
         self.logger.info(f'data: "{self.data_path}"')
         if self.data_num_folds:
             self.logger.info(f"  num_folds: {self.data_num_folds}")
@@ -436,6 +465,10 @@ class UNetTrainer(BaseTrainer):
         self.logger.info(f"  valid_samples: {len(self.valid_dataset)}")
         self.logger.info(f"  oversample: {self.data_oversample}")
         self.logger.info(f"  augment: {self.data_augment}")
+        if self.data_augment:
+            self.logger.info(
+                f"{json.dumps(self._get_train_transform().get_params_dict(), indent=1)}"
+            )
         self.logger.info(f"  normalize: {self.data_normalize}")
         self.logger.info(f"  batch_size: {self.batch_size}")
         self.logger.info(f"  num_workers: {self.num_workers}")
@@ -445,6 +478,7 @@ class UNetTrainer(BaseTrainer):
         self.logger.info(f"  warmup_steps: {self.warmup_steps}")
         self.logger.info(f"  lr_scheduler: {self.lr_scheduler}")
         self.logger.info(f"  start_lr: {self.start_lr}")
+        self.logger.info(f"  optimizer_kwargs: {self.optimizer_kwargs}")
 
     def on_train_start(self):
         self.model = self._build_model()
@@ -482,10 +516,8 @@ class UNetTrainer(BaseTrainer):
         sanity_path = self.work_path / "sanity" / current_time_str
         sanity_path.mkdir(parents=True, exist_ok=True)
 
-        origin_image = self.train_dataset.get_image_path(0)
-        shutil.copyfile(origin_image, sanity_path / origin_image.name)
         for i in range(50):
-            image, _ = self.train_dataset.get_sample(0, False)
+            image, _ = self.train_dataset[0]
             image_pil: Image.Image = F.to_pil_image(image)
             image_pil.save(str(sanity_path / f"{i + 1}.png"))
 
@@ -516,6 +548,7 @@ class UNetTrainer(BaseTrainer):
         self.logger.info("Train")
 
         self._lr_scheduler.step(self.current_epoch)
+        self.logger.info(f"LR: {self._lr_scheduler.get_last_lr()}")
         self.epoch_train_outputs = []
         self.train_tqdm = tqdm(self.train_dataloader)
 
@@ -610,7 +643,9 @@ class UNetTrainer(BaseTrainer):
 
         if self._cur_valid_metric < self._best_valid_metric:
             self._best_valid_metric = self._cur_valid_metric
-            self.logger.info(f"New best metric ({self.metric}): {self._cur_valid_metric}")
+            self.logger.info(
+                f"New best metric ({self.metric}): {self._cur_valid_metric}"
+            )
             self.save_state_dict(
                 self.work_path
                 / f"fold_{self.cur_split_dict_id}"
@@ -667,7 +702,7 @@ class UNetTrainer(BaseTrainer):
                 "tp_hard": tp_hard,
                 "fp_hard": fp_hard,
                 "fn_hard": fn_hard,
-                "metric": metric
+                "metric": metric,
             }
         )
 

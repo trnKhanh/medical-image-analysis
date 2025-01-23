@@ -6,10 +6,37 @@ from torchvision.transforms import functional as F
 
 from PIL import Image
 
-from .common import image_to_tensor
+from .common import image_to_tensor, BaseTransform
 
+class JointResize(BaseTransform):
+    def __init__(self, image_size: Tuple[int, int] | int):
+        if isinstance(image_size, int):
+            image_size = (image_size, image_size)
 
-class MirrorTransform:
+        if len(image_size) < 2:
+            image_size = image_size * 2
+        self.image_size = list(image_size)
+
+    def __call__(
+        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
+    ):
+        data = image_to_tensor(data)
+        seg = image_to_tensor(seg)
+
+        data = F.resize(data, self.image_size, F.InterpolationMode.BILINEAR)
+        seg = F.resize(seg, self.image_size, F.InterpolationMode.NEAREST)
+
+        return data, seg
+
+    def get_params_dict(self):
+        params_dict = {
+            JointResize.__name__: {
+                "image_size": self.image_size,
+            }
+        }
+        return params_dict
+
+class MirrorTransform(BaseTransform):
     def __init__(self, allowed_axes: Tuple[int, ...]):
         self.allowed_axes = allowed_axes
 
@@ -28,8 +55,16 @@ class MirrorTransform:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            MirrorTransform.__name__: {
+                "allowed_axes": self.allowed_axes,
+            }
+        }
+        return params_dict
 
-class RandomRotation:
+
+class RandomRotation(BaseTransform):
     def __init__(self, degrees: float | Sequence[float]):
         if not isinstance(degrees, Sequence):
             degrees = [-degrees, degrees]
@@ -49,8 +84,16 @@ class RandomRotation:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomRotation.__name__: {
+                "degrees": self.degrees,
+            }
+        }
+        return params_dict
 
-class RandomCrop2D:
+
+class RandomCrop2D(BaseTransform):
     def __init__(self, crop: int | Tuple[int, int]):
         if not isinstance(crop, (List, Tuple)):
             crop = (crop, crop)
@@ -68,8 +111,16 @@ class RandomCrop2D:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomCrop2D.__name__: {
+                "crop": self.crop,
+            }
+        }
+        return params_dict
 
-class RandomAffine:
+
+class RandomAffine(BaseTransform):
     def __init__(
         self,
         degrees: float | Sequence[float] = 0.0,
@@ -106,3 +157,14 @@ class RandomAffine:
         seg = F.affine(seg, degree, list(translate), scale, list(shear))
 
         return data, seg
+
+    def get_params_dict(self):
+        params_dict = {
+            RandomAffine.__name__: {
+                "degrees": self.degrees,
+                "translate": self.translate,
+                "scale": self.scale,
+                "shear": self.shear
+            }
+        }
+        return params_dict

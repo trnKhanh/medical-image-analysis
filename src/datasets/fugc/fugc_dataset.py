@@ -5,14 +5,14 @@ from logging import Logger
 import json
 
 import torch
-from torch.utils.data import Dataset
+from datasets.basedataset import BaseDataset
 import torchvision.transforms.functional as F
 from PIL import Image
 
 from utils import get_path
 
 
-class FUGCDataset(Dataset):
+class FUGCDataset(BaseDataset):
     images_dir = "images"
     labels_dir = "labels"
 

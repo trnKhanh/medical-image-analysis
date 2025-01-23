@@ -1,3 +1,4 @@
+import json
 from typing import Sequence, Tuple
 import math
 
@@ -8,10 +9,10 @@ import torchvision.transforms.functional as F
 
 from PIL import Image
 
-from .common import image_to_tensor
+from .common import image_to_tensor, BaseTransform
 
 
-class RandomGamma:
+class RandomGamma(BaseTransform):
     def __init__(
         self,
         gamma: float | Sequence[float],
@@ -33,8 +34,16 @@ class RandomGamma:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomGamma.__name__: {
+                "gamma": self.gamma,
+            }
+        }
+        return params_dict
 
-class RandomContrast:
+
+class RandomContrast(BaseTransform):
     def __init__(
         self,
         contrast: float | Tuple[float, float],
@@ -55,8 +64,16 @@ class RandomContrast:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomContrast.__name__: {
+                "contrast": self.contrast,
+            }
+        }
+        return params_dict
 
-class RandomBrightness:
+
+class RandomBrightness(BaseTransform):
     def __init__(
         self,
         brightness: float | Tuple[float, float],
@@ -77,8 +94,16 @@ class RandomBrightness:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomBrightness.__name__: {
+                "brightness": self.brightness,
+            }
+        }
+        return params_dict
 
-class RandomGaussianNoise:
+
+class RandomGaussianNoise(BaseTransform):
     def __init__(
         self,
         sigma: float | Sequence[float],
@@ -104,8 +129,16 @@ class RandomGaussianNoise:
 
         return data, seg
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomGaussianNoise.__name__: {
+                "sigma": self.sigma,
+            }
+        }
+        return params_dict
 
-class RandomGaussianBlur:
+
+class RandomGaussianBlur(BaseTransform):
     def __init__(
         self,
         sigma: float | Sequence[float],
@@ -146,8 +179,16 @@ class RandomGaussianBlur:
         else:
             return c - 1
 
+    def get_params_dict(self):
+        params_dict = {
+            RandomGaussianBlur.__name__: {
+                "sigma": self.sigma,
+            }
+        }
+        return params_dict
 
-class SimulateLowRes:
+
+class SimulateLowRes(BaseTransform):
     def __init__(
         self,
         scale: float | Sequence[float],
@@ -179,3 +220,11 @@ class SimulateLowRes:
         )[0]
 
         return data, seg
+
+    def get_params_dict(self):
+        params_dict = {
+            SimulateLowRes.__name__: {
+                "scale": self.scale,
+            }
+        }
+        return params_dict

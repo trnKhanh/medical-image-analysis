@@ -38,6 +38,7 @@ namespaces = true
 [project.scripts]
 mia = "cli:__main__.main"
 mia_train = "entry.train:train_entry"
+mia_predict = "entry.predict:predict_entry"
 
 [tool.setuptools_scm]
 
