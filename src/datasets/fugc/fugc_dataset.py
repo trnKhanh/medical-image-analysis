@@ -109,23 +109,29 @@ class FUGCDataset(BaseDataset):
         labels_dir_path = self.data_path / FUGCDataset.labels_dir
 
         self.samples: List[Dict[str, Path]] = []
+        if self.split_dict:
+            for image_id in self.split_dict[self.split]:
+                self.samples.append({
+                    "image": images_dir_path / f"{image_id}.png",
+                    "label": labels_dir_path / f"{image_id}.png",
+                })
+        else:
+            for image_path in images_dir_path.glob("*.png"):
+                image_id = image_path.stem
 
-        for image_path in images_dir_path.glob("*.png"):
-            image_id = image_path.stem
+                if self.split_dict and image_id not in self.split_dict[self.split]:
+                    continue
 
-            if self.split_dict and image_id not in self.split_dict[self.split]:
-                continue
+                try:
+                    label_path = next(labels_dir_path.glob(f"{image_id}.*"))
+                except StopIteration:
+                    if self.logger:
+                        self.logger.warn(
+                            f"Image {image_path.name} does not have the corresponding label file"
+                        )
+                    continue
 
-            try:
-                label_path = next(labels_dir_path.glob(f"{image_id}.*"))
-            except StopIteration:
-                if self.logger:
-                    self.logger.warn(
-                        f"Image {image_path.name} does not have the corresponding label file"
-                    )
-                continue
-
-            self.samples.append({"image": image_path, "label": label_path})
+                self.samples.append({"image": image_path, "label": label_path})
 
         oversampled_samples = []
         for _ in range(self.oversample):

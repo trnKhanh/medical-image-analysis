@@ -55,6 +55,7 @@ class UNetTrainer(BaseTrainer):
         device: torch.device | str = torch.device("cuda"),
         seed: int = 12345,
         # Model parameters
+        num_classes: int = 2,
         image_size: int | tuple[int, int] | None = None,
         pretrained_model: Path | str | None = None,
         # Data parameters
@@ -93,6 +94,7 @@ class UNetTrainer(BaseTrainer):
         torch.manual_seed(self.seed)
 
         # >>> Model parameters
+        self.num_classes = num_classes
         self.image_size = image_size
         self.pretrained_model = pretrained_model
         # <<< Model parameters
@@ -194,8 +196,11 @@ class UNetTrainer(BaseTrainer):
             shell_handler.setFormatter(shell_formatter)
             self.logger.addHandler(shell_handler)
 
-    def _build_model(self):
-        return UNet(3, 3)
+    def _build_model(self, pretrained_model: str | Path | None = None):
+        self.model = UNet(3)
+        if pretrained_model:
+            self.load_model_checkpoint(pretrained_model)
+        self.model.init_head(self.num_classes)
 
     def _setup_split_dict(self):
         self.cur_split_dict_id = 0
@@ -415,9 +420,7 @@ class UNetTrainer(BaseTrainer):
         elif optimizer == "adamw":
             _optimizer = torch.optim.AdamW(model.parameters(), **kwargs)
         elif optimizer == "sgd":
-            _optimizer = torch.optim.SGD(
-                model.parameters(), weight_decay=3e-5, **kwargs
-            )
+            _optimizer = torch.optim.SGD(model.parameters(), **kwargs)
         else:
             raise ValueError(f'Optimizer "{optimizer}" not supported')
 
@@ -481,9 +484,7 @@ class UNetTrainer(BaseTrainer):
         self.logger.info(f"  optimizer_kwargs: {self.optimizer_kwargs}")
 
     def on_train_start(self):
-        self.model = self._build_model()
-        if self.pretrained_model:
-            self.load_model_checkpoint(self.pretrained_model)
+        self._build_model(self.pretrained_model)
 
         self.current_epoch = 0
         self.current_patient = 0
@@ -796,14 +797,17 @@ class UNetTrainer(BaseTrainer):
         }
 
     def load_model_checkpoint(self, pretrained_model: str | Path):
-        state_dict = torch.load(pretrained_model, map_location="cpu")
+        state_dict = torch.load(pretrained_model, map_location="cpu", weights_only=True)
         try:
             if "model" in state_dict:
-                self.model.load_state_dict(state_dict["model"])
+                self.model.load_state_dict(state_dict["model"], strict=False)
             else:
-                self.model.load_state_dict(state_dict)
-        except:
+                self.model.load_state_dict(state_dict, strict=False)
+            self.logger.info(f"Load model checkpoint from {pretrained_model}")
+        except Exception as e:
             self.logger.warn("Load model checkpoint failed")
+            self.logger.exception(e)
+
 
     def load_state_dict(self, save_path: str | Path):
         state_dict = torch.load(save_path, map_location="cpu")

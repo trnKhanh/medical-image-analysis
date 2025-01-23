@@ -10,7 +10,10 @@ def parse_args():
     parser.add_argument("--log-file", default=None, type=str)
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--data-dir", nargs="+", required=True, type=str)
+    parser.add_argument("--split-dicts", default=None)
+    parser.add_argument("--checkpoint", default=None)
 
+    parser.add_argument("--num-classes", default=3, type=int)
     parser.add_argument("--image-size", default=None, nargs="+", type=int)
 
     parser.add_argument("--num-folds", default=5, type=int)
@@ -36,9 +39,12 @@ def train_entry():
         work_path=args.work_dir,
         device=args.device,
         data_path=args.data_dir,
+        data_split_dicts=args.split_dicts,
         data_num_folds=args.num_folds,
         data_valid_rate=args.valid_rate,
         data_fold="all",
+        pretrained_model=args.checkpoint,
+        num_classes=args.num_classes,
         image_size=args.image_size,
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
@@ -52,7 +58,7 @@ def train_entry():
         data_augment=not args.no_augment,
         data_normalize=not args.no_normalization,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
     )
     trainer.initialize()
 
