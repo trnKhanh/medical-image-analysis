@@ -3,6 +3,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 import torch
+import torchvision.transforms.functional as F
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
@@ -13,7 +14,7 @@ from transforms.normalization import ZScoreNormalize
 
 
 class model:
-    def __init__(self):
+    def __init__(self, image_size):
         """
         This constructor is supposed to initialize data members.
         Use triple quotes for function documentation.
@@ -21,6 +22,9 @@ class model:
         self.mean = None
         self.std = None
         self.model = [UNet(3, 3).cpu() for _ in range(5)]
+        if len(image_size) < 2:
+            image_size *= 2
+        self.image_size = image_size
 
         self.normalization = ZScoreNormalize()
 
@@ -40,6 +44,8 @@ class model:
             self.model[i].eval()
         X = X / 255.0
         image = torch.tensor(X, dtype=torch.float32)
+        ori_shape = [image.shape[-2], image.shape[-1]]
+        image = F.resize(image, self.image_size, F.InterpolationMode.BILINEAR)
         # image, _ = self.normalization(image, None)
         image = image.unsqueeze(0)
 
@@ -53,8 +59,10 @@ class model:
                 total_prob = seg
 
         total_prob = (
-            total_prob.squeeze(0).argmax(dim=0).detach().numpy()
+            total_prob.squeeze(0).argmax(dim=0)
         )  # (336,544) values:{0,1,2} 1 upper 2 lower
+        total_prob = F.resize(total_prob[None], ori_shape, F.InterpolationMode.NEAREST)[0]
+        total_prob = total_prob.detach().numpy()
 
         return total_prob
 
@@ -74,6 +82,7 @@ def parse_args():
     parser.add_argument("--output-dir", required=True, type=str)
     parser.add_argument("--visualize-dir", required=True, type=str)
     parser.add_argument("--run-model", action="store_true")
+    parser.add_argument("--image-size", nargs="+", type=int)
 
     parser.add_argument("--batch-size", default=32, type=int)
     parser.add_argument("--no-normalization", action="store_true")
@@ -84,7 +93,7 @@ def parse_args():
 def predict_entry():
     args = parse_args()
 
-    m = model()
+    m = model(args.image_size)
     m.load(args.work_dir)
 
     images_dir_path = Path(args.images_dir)

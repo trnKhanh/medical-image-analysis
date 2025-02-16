@@ -39,6 +39,8 @@ namespaces = true
 mia = "cli:__main__.main"
 mia_train = "entry.train:train_entry"
 mia_predict = "entry.predict:predict_entry"
+mia_mask2rle = "entry.preprocess.mask2rle:mask2rle_entry"
+mia_rle2mask = "entry.preprocess.rle2mask:rle2mask_entry"
 
 [tool.setuptools_scm]
 
