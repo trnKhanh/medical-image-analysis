@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mia"
+authors = [
+  {name = "Nam Khanh Tran", email = "21120015@student.hcmus.edu.vn"},
+  {name = "Le Dac Phu Phan", email = "21120111@student.hcmus.edu.vn"},
+]
+description = ""
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = []
+classifiers = []
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "torchvision",
+  "numpy<2",
+  "monai", 
+  "rich",
+  "pillow",
+  "tqdm",
+  "rich",
+  "opencv-python",
+  "nnunetv2",
+  "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
+]
+dynamic = ["version"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+exclude = []
+namespaces = true
+
+[project.scripts]
+fugc2025_train = "entry.fugc2025.train:train_entry"
+fugc2025_predict = "entry.fugc2025.predict:predict_entry"
+fugc2025_mask2rle = "entry.fugc2025.preprocess.mask2rle:mask2rle_entry"
+fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
+
+[tool.setuptools_scm]
+
