@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "medical-image-analysis"
+name = "mia"
 authors = [
   {name = "Nam Khanh Tran", email = "21120015@student.hcmus.edu.vn"},
   {name = "Le Dac Phu Phan", email = "21120111@student.hcmus.edu.vn"},
