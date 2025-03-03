@@ -36,11 +36,10 @@ exclude = []
 namespaces = true
 
 [project.scripts]
-mia = "cli:__main__.main"
-mia_train = "entry.train:train_entry"
-mia_predict = "entry.predict:predict_entry"
-mia_mask2rle = "entry.preprocess.mask2rle:mask2rle_entry"
-mia_rle2mask = "entry.preprocess.rle2mask:rle2mask_entry"
+fugc2025_train = "entry.fugc2025.train:train_entry"
+fugc2025_predict = "entry.fugc2025.predict:predict_entry"
+fugc2025_mask2rle = "entry.fugc2025.preprocess.mask2rle:mask2rle_entry"
+fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
 
 [tool.setuptools_scm]
 
