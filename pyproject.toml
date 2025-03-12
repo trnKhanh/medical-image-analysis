@@ -26,6 +26,7 @@ dependencies = [
   "opencv-python",
   "nnunetv2",
   "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
+  "SimpleITK",
 ]
 dynamic = ["version"]
 
