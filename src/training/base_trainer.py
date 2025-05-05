@@ -29,11 +29,11 @@ class BaseTrainer(ABC):
         pass
 
     @abstractmethod
-    def train_step(self, data: torch.Tensor, target: torch.Tensor):
+    def train_step(self, *args, **kwargs):
         pass
 
     @abstractmethod
-    def valid_step(self, data: torch.Tensor, target: torch.Tensor):
+    def valid_step(self, *args, **kwargs):
         pass
 
     @abstractmethod
@@ -41,7 +41,7 @@ class BaseTrainer(ABC):
         pass
 
     @abstractmethod
-    def valid(self):
+    def perform_real_test(self):
         pass
 
     @abstractmethod

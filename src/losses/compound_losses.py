@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 from .dice import SoftDiceLoss, MemoryEfficientSoftDiceLoss
 from .robust_ce_loss import RobustCrossEntropyLoss, TopKLoss
@@ -10,6 +12,76 @@ def softmax_helper_dim0(x: torch.Tensor) -> torch.Tensor:
 
 def softmax_helper_dim1(x: torch.Tensor) -> torch.Tensor:
     return torch.softmax(x, 1)
+
+
+class DiceAndCELoss(nn.Module):
+    def __init__(
+        self,
+        dice_loss: Callable = MemoryEfficientSoftDiceLoss,
+        dice_kwargs: dict = {},
+        ce_loss: Callable = RobustCrossEntropyLoss,
+        ce_kwargs: dict = {},
+        default_dice_weight: float = 0.5,
+    ):
+        self.dice_loss = dice_loss(**dice_kwargs)
+        self.ce_loss = ce_loss(**ce_kwargs)
+        self.default_dice_weight = default_dice_weight
+
+    def forward(
+        self,
+        low_res_logits,
+        low_res_label_batch,
+        dice_weight: float | None = None,
+    ):
+        if not dice_weight:
+            dice_weight = self.default_dice_weight
+        loss_ce = self.ce_loss(low_res_logits, low_res_label_batch)
+        loss_dice = self.dice_loss(
+            low_res_logits, low_res_label_batch, softmax=True
+        )
+        loss = (1 - dice_weight) * loss_ce + dice_weight * loss_dice
+        return loss, loss_ce, loss_dice
+
+
+class DualBranchDiceAndCELoss(nn.Module):
+    def __init__(
+        self,
+        dice_loss: Callable = MemoryEfficientSoftDiceLoss,
+        dice_kwargs: dict = {},
+        ce_loss: Callable = RobustCrossEntropyLoss,
+        ce_kwargs: dict = {},
+        default_dice_weight: float = 0.5,
+    ):
+        self.dice_loss = dice_loss(**dice_kwargs)
+        self.ce_loss = ce_loss(**ce_kwargs)
+        self.default_dice_weight = default_dice_weight
+
+    def forward(
+        self,
+        outputs,
+        low_res_label_batch,
+        dice_weight: float | None = None,
+    ):
+        if not dice_weight:
+            dice_weight = self.default_dice_weight
+        # for the first branch
+        low_res_logits1 = outputs["low_res_logits1"]
+        loss_ce1 = self.ce_loss(low_res_logits1, low_res_label_batch[:].long())
+        loss_dice1 = self.dice_loss(
+            low_res_logits1, low_res_label_batch, softmax=True
+        )
+        loss1 = (1 - dice_weight) * loss_ce1 + dice_weight * loss_dice1
+
+        # for the second branch
+        low_res_logits2 = outputs["low_res_logits2"]
+        loss_ce2 = self.ce_loss(low_res_logits2, low_res_label_batch[:].long())
+        loss_dice2 = self.dice_loss(
+            low_res_logits2, low_res_label_batch, softmax=True
+        )
+        loss2 = (1 - dice_weight) * loss_ce2 + dice_weight * loss_dice2
+
+        loss = loss1 + loss2
+        return loss, loss1, loss_ce1, loss_dice1, loss2, loss_ce2, loss_dice2
 
 
 class DC_and_CE_loss(nn.Module):
