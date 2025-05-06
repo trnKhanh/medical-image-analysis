@@ -99,16 +99,22 @@ class FUGCDataset(BaseDataset):
         image = Image.open(image_path).convert("RGB")
         label = F.pil_to_tensor(Image.open(label_path)).to(dtype=torch.int32)
 
+        data = {
+            "image": image,
+            "label": label,
+        }
+
         if self.transform:
-            image, label = self.transform(image, label)
+            data = self.transform(data)
 
         if self.normalize and normalize:
-            image, label = self.normalize(image, label)
+            data = self.normalize(data)
 
         if not isinstance(image, torch.Tensor):
             image = F.to_tensor(image)
 
-        return image, label
+
+        return data
 
     def get_image_path(self, index):
         return self.samples[index]["image"]

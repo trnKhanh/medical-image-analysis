@@ -1,7 +1,7 @@
 from typing import Callable
 
 import torch
-from .dice import SoftDiceLoss, MemoryEfficientSoftDiceLoss
+from .dice import MemoryEfficientSoftDiceLoss, DiceLoss
 from .robust_ce_loss import RobustCrossEntropyLoss, TopKLoss
 from torch import nn
 
@@ -17,7 +17,7 @@ def softmax_helper_dim1(x: torch.Tensor) -> torch.Tensor:
 class DiceAndCELoss(nn.Module):
     def __init__(
         self,
-        dice_loss: Callable = MemoryEfficientSoftDiceLoss,
+        dice_loss: Callable = DiceLoss,
         dice_kwargs: dict = {},
         ce_loss: Callable = RobustCrossEntropyLoss,
         ce_kwargs: dict = {},
@@ -46,7 +46,7 @@ class DiceAndCELoss(nn.Module):
 class DualBranchDiceAndCELoss(nn.Module):
     def __init__(
         self,
-        dice_loss: Callable = MemoryEfficientSoftDiceLoss,
+        dice_loss: Callable = DiceLoss,
         dice_kwargs: dict = {},
         ce_loss: Callable = RobustCrossEntropyLoss,
         ce_kwargs: dict = {},

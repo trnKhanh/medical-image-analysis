@@ -20,6 +20,9 @@ def get_current_time_str():
     return datetime.now().strftime("%d%m%Y_%H%M%S")
 
 def draw_mask(image, mask, opacity=0.1):
+    image = np.array(image)
+    mask = np.array(mask)
+
     class_colors = {
         1: np.array([255, 0, 0], dtype=np.uint8),
         2: np.array([0, 255, 0], dtype=np.uint8),

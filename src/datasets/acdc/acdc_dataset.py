@@ -10,10 +10,14 @@ from torch.utils.data.sampler import Sampler
 from ..basedataset import BaseDataset
 from utils import get_path
 
+
 class ACDCDataset(BaseDataset):
     SAMPLES_DIR = "data"
     TRAIN_SPLIT_FILE = "train_slices.list"
     VALID_SPLIT_FILE = "val.list"
+    TEST_SPLIT_FILE = "test.list"
+    NUM_CLASSES = 3
+    Z_SPACING = 1
 
     @staticmethod
     def find_samples(
@@ -48,7 +52,7 @@ class ACDCDataset(BaseDataset):
     def __init__(
         self,
         data_path: Path | str,
-        split: Literal["train", "valid"] = "train",
+        split: Literal["train", "valid", "test"] = "train",
         num: int | None = None,
         normalize: Callable | None = None,
         transform: Callable | None = None,
@@ -67,14 +71,20 @@ class ACDCDataset(BaseDataset):
 
     def _register_samples(self):
         if self.split == "train":
-            with open(self.data_path / "train_slices.list", "r") as f:
+            with open(self.data_path / ACDCDataset.TRAIN_SPLIT_FILE, "r") as f:
                 self.samples_list = f.readlines()
             self.samples_list = [
                 item.replace("\n", "") for item in self.samples_list
             ]
 
         elif self.split == "valid":
-            with open(self.data_path / "val.list", "r") as f:
+            with open(self.data_path / ACDCDataset.VALID_SPLIT_FILE, "r") as f:
+                self.samples_list = f.readlines()
+            self.samples_list = [
+                item.replace("\n", "") for item in self.samples_list
+            ]
+        elif self.split == "test":
+            with open(self.data_path / ACDCDataset.TEST_SPLIT_FILE, "r") as f:
                 self.samples_list = f.readlines()
             self.samples_list = [
                 item.replace("\n", "") for item in self.samples_list
@@ -100,24 +110,31 @@ class ACDCDataset(BaseDataset):
             h5f = h5py.File(self.data_path / "data/{}.h5".format(case), "r")
 
         if "image" in h5f:
-            image = h5f["image"][:]
+            image_ds = h5f["image"]
+            assert isinstance(image_ds, h5py.Dataset)
+            image = image_ds[:]
         else:
             raise RuntimeError(f"Case {case}.h5 does not have image field")
         if "label" in h5f:
-            label = h5f["label"][:]
+            label_ds = h5f["label"]
+            assert isinstance(label_ds, h5py.Dataset)
+            label = label_ds[:]
         else:
             raise RuntimeError(f"Case {case}.h5 does not have label field")
 
+        image = np.expand_dims(image, 0).repeat(3, 0)
+
+        data = {"image": image, "label": label}
+
         if self.transform:
-            image, label = self.transform(image, label)
+            data = self.transform(data)
 
         if self.normalize and normalize:
-            image, label = self.normalize(image, label)
+            data = self.normalize(data)
 
-        sample = {"image": image, "label": label}
-        sample["case_name"] = self.samples_list[index].strip("\n")
+        data["case_name"] = self.samples_list[index].strip("\n")
 
-        return sample
+        return data
 
 
 class TwoStreamBatchSampler(Sampler):

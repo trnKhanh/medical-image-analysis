@@ -760,13 +760,17 @@ class UNetTrainer(BaseTrainer):
                 break
             self.on_epoch_start()
             self.on_train_epoch_start()
-            for data, target in self.train_tqdm:
+            for sampled_batch in self.train_tqdm:
+                data = sampled_batch["image"] 
+                target = sampled_batch["label"]
                 self.train_step(data, target)
             self.on_train_epoch_end()
 
             with torch.no_grad():
                 self.on_valid_epoch_start()
-                for data, target in self.valid_tqdm:
+                for sampled_batch in self.valid_tqdm:
+                    data = sampled_batch["image"] 
+                    target = sampled_batch["label"]
                     self.valid_step(data, target)
                 self.on_valid_epoch_end()
             self.on_epoch_end()
