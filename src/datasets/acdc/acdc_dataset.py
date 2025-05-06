@@ -12,10 +12,13 @@ from utils import get_path
 
 
 class ACDCDataset(BaseDataset):
-    SAMPLES_DIR = "data"
-    TRAIN_SPLIT_FILE = "train_slices.list"
-    VALID_SPLIT_FILE = "val.list"
-    TEST_SPLIT_FILE = "test.list"
+    RAW_DIR = "ACDC_raw"
+
+    PROCESSED_DIR = "ACDC"
+    SAMPLES_DIR = f"{PROCESSED_DIR}/data"
+    TRAIN_SPLIT_FILE = f"{PROCESSED_DIR}/train_slices.list"
+    VALID_SPLIT_FILE = f"{PROCESSED_DIR}/val.list"
+    TEST_SPLIT_FILE = f"{PROCESSED_DIR}/test.list"
     NUM_CLASSES = 3
     Z_SPACING = 1
 
@@ -104,10 +107,13 @@ class ACDCDataset(BaseDataset):
 
         if self.split == "train":
             h5f = h5py.File(
-                self.data_path / "data/slices/{}.h5".format(case), "r"
+                self.data_path / f"{ACDCDataset.SAMPLES_DIR}/slices/{case}.h5",
+                "r",
             )
         else:
-            h5f = h5py.File(self.data_path / "data/{}.h5".format(case), "r")
+            h5f = h5py.File(
+                self.data_path / f"{ACDCDataset.SAMPLES_DIR}data/{case}.h5", "r"
+            )
 
         if "image" in h5f:
             image_ds = h5f["image"]

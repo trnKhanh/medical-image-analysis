@@ -77,7 +77,7 @@ class CPCSAMTrainer(BaseTrainer):
         seed: int = 12345,
         # Model parameters
         in_channels: int = 3,
-        num_classes: int = 2,
+        num_classes: int = 3,
         patch_size: int | tuple[int, int] | None = None,
         image_size: int | tuple[int, int] | None = None,
         sam_name: str = "vit_b_dualmask_same_prompt_class_random_large",
@@ -147,7 +147,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.do_augment = do_augment
         self.do_normalize = do_normalize
         self.batch_size = batch_size
-        self.labeled_batch_size = batch_size * labeled_batch_ratio
+        self.labeled_batch_size = round(batch_size * labeled_batch_ratio)
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         # <<< Data parameters
@@ -260,7 +260,7 @@ class CPCSAMTrainer(BaseTrainer):
         assert self.logger is not None
 
         if not self.config_path:
-            return
+            self.config_path = self.work_path / "config.txt"
 
         self.config_path = get_path(self.config_path)
 
@@ -445,11 +445,21 @@ class CPCSAMTrainer(BaseTrainer):
         parameters = filter(lambda p: p.requires_grad, model.parameters())
 
         if self.optimizer_name == "adam":
-            optimizer = torch.optim.Adam(parameters, **self.optimizer_kwargs)
+            optimizer = torch.optim.Adam(
+                parameters,
+                betas=(0.9, 0.999),
+                weight_decay=0.1,
+                **self.optimizer_kwargs,
+            )
         elif self.optimizer_name == "adamw":
             optimizer = torch.optim.AdamW(parameters, **self.optimizer_kwargs)
         elif self.optimizer_name == "sgd":
-            optimizer = torch.optim.SGD(parameters, **self.optimizer_kwargs)
+            optimizer = torch.optim.SGD(
+                parameters,
+                momentum=0.9,
+                weight_decay=0.001,
+                **self.optimizer_kwargs,
+            )
         else:
             raise ValueError(f'Optimizer "{self.optimizer_name}" not supported')
 
@@ -468,7 +478,7 @@ class CPCSAMTrainer(BaseTrainer):
         return optimizer, lr_scheduler
 
     def _get_loss(self):
-        if self.loss_name == "DICE+CE":
+        if self.loss_name == "dice+ce":
             supervised_loss = DiceAndCELoss(
                 dice_loss=DiceLoss,
                 dice_kwargs={
@@ -601,6 +611,9 @@ class CPCSAMTrainer(BaseTrainer):
         self._epoch_end_time = time.time()
         time_elapsed = self._epoch_end_time - self._epoch_start_time
         self.logger.info(f"Epoch time elapsed: {time_elapsed:.3f} seconds")
+
+        for h in self.logger.handlers:
+            h.flush()
 
     def on_train_epoch_start(self):
         self._train_start_time = time.time()

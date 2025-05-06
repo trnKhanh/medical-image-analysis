@@ -23,6 +23,7 @@ class DiceAndCELoss(nn.Module):
         ce_kwargs: dict = {},
         default_dice_weight: float = 0.5,
     ):
+        super().__init__()
         self.dice_loss = dice_loss(**dice_kwargs)
         self.ce_loss = ce_loss(**ce_kwargs)
         self.default_dice_weight = default_dice_weight
@@ -52,6 +53,7 @@ class DualBranchDiceAndCELoss(nn.Module):
         ce_kwargs: dict = {},
         default_dice_weight: float = 0.5,
     ):
+        super().__init__()
         self.dice_loss = dice_loss(**dice_kwargs)
         self.ce_loss = ce_loss(**ce_kwargs)
         self.default_dice_weight = default_dice_weight
@@ -92,7 +94,7 @@ class DC_and_CE_loss(nn.Module):
         weight_ce=1,
         weight_dice=1,
         ignore_label=None,
-        dice_class=SoftDiceLoss,
+        dice_class=MemoryEfficientSoftDiceLoss,
     ):
         """
         Weights for CE and Dice do not need to sum to one. You can set whatever you want.

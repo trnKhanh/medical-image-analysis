@@ -27,6 +27,7 @@ dependencies = [
   "nnunetv2",
   "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
   "SimpleITK",
+  "medpy"
 ]
 dynamic = ["version"]
 
@@ -41,6 +42,8 @@ fugc2025_train = "entry.fugc2025.train:train_entry"
 fugc2025_predict = "entry.fugc2025.predict:predict_entry"
 fugc2025_mask2rle = "entry.fugc2025.preprocess.mask2rle:mask2rle_entry"
 fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
+
+cpcsam_train = "entry.cpcsam.train:train_entry"
 
 [tool.setuptools_scm]
 

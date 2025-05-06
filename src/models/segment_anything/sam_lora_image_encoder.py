@@ -1,4 +1,4 @@
-from segment_anything import sam_model_registry
+from . import sam_model_registry
 
 import math
 import torch

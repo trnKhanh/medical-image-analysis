@@ -10,7 +10,6 @@ import itertools
 import torch
 from torch import nn
 from torch.nn import functional as F
-from icecream import ic
 from typing import Any, Dict, List, Tuple
 
 from .image_encoder import ImageEncoderViT
