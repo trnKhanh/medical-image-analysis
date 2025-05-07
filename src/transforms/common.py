@@ -57,7 +57,7 @@ class RandomChoiceTransform(BaseTransform):
     def get_params_dict(self):
         params_dict = {
             RandomChoiceTransform.__name__: {
-                "weights": self.weight,
+                "weights": self.weight.tolist(),
                 "transforms": [t.get_params_dict() for t in self.transforms],
             }
         }

@@ -5,7 +5,9 @@ from typing import Literal, Callable, Any
 
 import h5py
 import numpy as np
+import torch
 from torch.utils.data.sampler import Sampler
+import torchvision.transforms.functional as F
 
 from ..basedataset import BaseDataset
 from utils import get_path
@@ -112,7 +114,7 @@ class ACDCDataset(BaseDataset):
             )
         else:
             h5f = h5py.File(
-                self.data_path / f"{ACDCDataset.SAMPLES_DIR}data/{case}.h5", "r"
+                self.data_path / f"{ACDCDataset.SAMPLES_DIR}/{case}.h5", "r"
             )
 
         if "image" in h5f:
@@ -128,7 +130,7 @@ class ACDCDataset(BaseDataset):
         else:
             raise RuntimeError(f"Case {case}.h5 does not have label field")
 
-        image = np.expand_dims(image, 0).repeat(3, 0)
+        label = np.int32(label)
 
         data = {"image": image, "label": label}
 

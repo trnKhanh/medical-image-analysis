@@ -1,4 +1,5 @@
 from . import sam_model_registry
+from typing import Any
 
 import math
 import torch
@@ -178,6 +179,10 @@ class LoRA_Sam(nn.Module):
 
     def forward(self, batched_input, multimask_output, image_size, prompt_idx = -1, prompt_mode = None):
         return self.sam(batched_input, multimask_output, image_size, prompt_idx, prompt_mode)
+
+    @property
+    def device(self) -> Any:
+        return self.sam.device
 
 
     # def forward(self, x: Tensor) -> Tensor:

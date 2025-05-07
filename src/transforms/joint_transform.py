@@ -49,7 +49,7 @@ class RandomRotation90(BaseTransform):
 
         k = int(torch.randint(0, 4, (1,)).item())
         image = torch.rot90(image, k, self.axes)
-        label = torch.rot90(image, k, self.axes)
+        label = torch.rot90(label, k, self.axes)
 
         data["image"] = image
         data["label"] = label
@@ -81,7 +81,7 @@ class MirrorTransform(BaseTransform):
             return data
 
         image = torch.flip(image, self.axes)
-        label = torch.flip(image, self.axes)
+        label = torch.flip(label, self.axes)
 
         data["image"] = image
         data["label"] = label

@@ -28,7 +28,6 @@ def test_single_volume(
     patch_size=[512, 512],
     loss_fn=None,
 ):
-
     image, label = (
         image.squeeze(0).cpu().detach().numpy(),
         label.squeeze(0).cpu().detach().numpy(),
@@ -57,7 +56,12 @@ def test_single_volume(
             output_masks = outputs["masks"]
 
             if loss_fn:
-                loss_list.append(loss_fn(output_masks, label[ind]))
+                label_slice = zoom(label[ind], (patch_size[0] / x, patch_size[1] / y), order=0)
+                loss_list.append(
+                    loss_fn(
+                        output_masks, torch.from_numpy(label_slice).unsqueeze(0).long().to(net.device)
+                    )
+                )
 
             out = torch.argmax(
                 torch.softmax(output_masks, dim=1), dim=1
@@ -76,7 +80,8 @@ def test_single_volume(
             calculate_metric_percase(prediction == i, label == i)
         )
     if len(loss_list):
-        loss = sum(loss_list) / len(loss_list)
+        losses = torch.Tensor(loss_list)
+        loss = losses.mean()
     else:
         loss = None
 
@@ -167,7 +172,12 @@ def test_single_volume_prompt(
             output_masks = outputs["masks"]
 
             if loss_fn:
-                loss_list.append(loss_fn(output_masks, label[ind]))
+                label_slice = zoom(label[ind], (patch_size[0] / x, patch_size[1] / y), order=0)
+                loss_list.append(
+                    loss_fn(
+                        output_masks, torch.from_numpy(label_slice).unsqueeze(0).long().to(net.device)
+                    )
+                )
 
             out = torch.argmax(
                 torch.softmax(output_masks, dim=1), dim=1
@@ -187,7 +197,8 @@ def test_single_volume_prompt(
         )
 
     if len(loss_list):
-        loss = sum(loss_list) / len(loss_list)
+        losses = torch.Tensor(loss_list)
+        loss = losses.mean()
     else:
         loss = None
 
@@ -260,6 +271,7 @@ def test_single_volume_scm(
         )
     return metric_list
 
+
 def calculate_metric_percase_nan(pred, gt, raw_spacing):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
@@ -273,6 +285,7 @@ def calculate_metric_percase_nan(pred, gt, raw_spacing):
     jc = metric.binary.jc(pred, gt)
     return dice, hd95, asd, jc
 
+
 def test_single_volume_mean(
     data_path: Path,
     image,
@@ -282,11 +295,11 @@ def test_single_volume_mean(
     multimask_output,
     patch_size=[512, 512],
     input_size=[224, 224],
-    test_save_path: Path|None=None,
+    test_save_path: Path | None = None,
     case=None,
     z_spacing=1,
 ):
-    assert(len(image.shape) == 3)
+    assert len(image.shape) == 3
 
     prediction = np.zeros_like(label)
     for ind in range(image.shape[0]):

@@ -195,7 +195,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.load_model_checkpoint(self.lora_ckpt)
 
     def _set_snapshot_work_dir(self):
-        current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        current_time_str = datetime.now().strftime("%Y%m%d_%H")
         snapshot_list = [
             f"ACDC",
             f"{current_time_str}",
@@ -224,7 +224,10 @@ class CPCSAMTrainer(BaseTrainer):
 
     def _set_seed(self, seed: int):
         self.seed = seed
+        random.seed(seed)
+        np.random.seed(seed)
         torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
 
     def _setup_logger(self):
         self.logger = logging.getLogger("MIA.CPCSAMTrainer")
@@ -341,6 +344,9 @@ class CPCSAMTrainer(BaseTrainer):
             self.logger.error("Dataset not found")
         return ref_dict[str(patiens_num)]
 
+    def _worker_init_fn(self,worker_id):
+        random.seed(self.seed + worker_id)
+
     def get_data(self):
         train_dataset = ACDCDataset(
             data_path=self.data_path,
@@ -360,14 +366,12 @@ class CPCSAMTrainer(BaseTrainer):
             self.batch_size - self.labeled_batch_size,
         )
 
-        def worker_init_fn(worker_id):
-            random.seed(self.seed + worker_id)
 
         train_dataloader = DataLoader(
             dataset=train_dataset,
             batch_sampler=batch_sampler,
             num_workers=self.num_workers,
-            worker_init_fn=worker_init_fn,
+            # worker_init_fn=self._worker_init_fn,
             pin_memory=self.pin_memory,
         )
 
@@ -427,10 +431,7 @@ class CPCSAMTrainer(BaseTrainer):
             return None
 
     def _get_valid_transform(self):
-        transforms = []
-        if self.image_size:
-            transforms.append(JointResize(self.image_size))
-        return ComposeTransform(transforms)
+        return None
 
     def _get_valid_normalize(self):
         if self.do_normalize:
@@ -587,12 +588,14 @@ class CPCSAMTrainer(BaseTrainer):
         sanity_path.mkdir(parents=True, exist_ok=True)
 
         for i in range(50):
-            sample = self.train_dataset[0]
+            sample = self.train_dataset[i % 2]
             image = sample["image"]
             label = sample["label"]
-            mask_overlay = draw_mask(image, label)
-            image_pil = Image.fromarray(mask_overlay)
-            image_pil.save(str(sanity_path / f"{i + 1}.png"))
+            image_pil = F.to_pil_image(image).convert("RGB")
+            label_pil = F.to_pil_image(label)
+            mask_overlay = draw_mask(image_pil, label_pil)
+            mask_overlay_pil = Image.fromarray(mask_overlay)
+            mask_overlay_pil.save(str(sanity_path / f"{i + 1}.png"))
 
     def on_train_end(self):
         self.save_state_dict(self.work_path / f"ckpt/final_model.pth")
@@ -735,7 +738,6 @@ class CPCSAMTrainer(BaseTrainer):
         return predicted_segmentation_onehot
 
     def train_step(self, sampled_batch):
-        self.logger.info(f"")
         self.logger.info(f"Iteration {self.current_iter}:")
 
         self.lr_scheduler.step(self.current_iter)
@@ -745,6 +747,9 @@ class CPCSAMTrainer(BaseTrainer):
             sampled_batch["image"],
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
+
+        image_batch = image_batch.repeat(1, 3, 1, 1)
+        label_batch = label_batch.squeeze(1).long()
 
         image_batch, label_batch = image_batch.to(self.device), label_batch.to(
             self.device
@@ -932,9 +937,11 @@ class CPCSAMTrainer(BaseTrainer):
             self.optimizer.step()
 
         loss = loss1 + loss2 + loss3
-        losses = [loss, loss1, loss2, loss3]
-        self.logger.info(f"Loss: {losses}")
-        self.epoch_train_outputs.append({"loss": torch.Tensor(losses)})
+        losses = torch.Tensor([loss, loss1, loss2, loss3])
+        self.logger.info(f"Loss: {losses.tolist()}")
+        self.epoch_train_outputs.append({"loss": losses})
+        self.current_iter += 1
+        self.logger.info(f"")
 
     def valid_step(self, sampled_batch):
         metric, loss = test_single_volume(
@@ -942,7 +949,7 @@ class CPCSAMTrainer(BaseTrainer):
             label=sampled_batch["label"],
             net=self.model,
             classes=self.num_classes + 1,
-            patch_size=self.image_size,
+            patch_size=[self.image_size, self.image_size],
             loss_fn=self.supervised_loss,
         )
         prompt_metric, prompt_loss = test_single_volume_prompt(
@@ -952,7 +959,7 @@ class CPCSAMTrainer(BaseTrainer):
             classes=self.num_classes + 1,
             promptidx=1,
             promptmode=self.promptmode,
-            patch_size=self.image_size,
+            patch_size=[self.image_size, self.image_size],
             loss_fn=self.supervised_loss,
         )
 

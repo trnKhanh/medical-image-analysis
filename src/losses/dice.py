@@ -7,7 +7,7 @@ from torch import nn
 class DiceLoss(nn.Module):
     def __init__(self, num_classes: int, smooth: float = 1e-5, do_bg: bool = False):
         super(DiceLoss, self).__init__()
-        self.num_classes = num_classes
+        self.num_classes = num_classes + 1 # Include background
         self.smooth = smooth
         self.do_bg = do_bg
 
