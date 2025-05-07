@@ -592,8 +592,7 @@ class CPCSAMTrainer(BaseTrainer):
             image = sample["image"]
             label = sample["label"]
             image_pil = F.to_pil_image(image).convert("RGB")
-            label_pil = F.to_pil_image(label)
-            mask_overlay = draw_mask(image_pil, label_pil)
+            mask_overlay = draw_mask(image_pil, label)
             mask_overlay_pil = Image.fromarray(mask_overlay)
             mask_overlay_pil.save(str(sanity_path / f"{i + 1}.png"))
 
@@ -748,8 +747,6 @@ class CPCSAMTrainer(BaseTrainer):
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
 
-        image_batch = image_batch.repeat(1, 3, 1, 1)
-        label_batch = label_batch.squeeze(1).long()
 
         image_batch, label_batch = image_batch.to(self.device), label_batch.to(
             self.device

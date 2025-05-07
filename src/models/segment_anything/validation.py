@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torchvision.transforms.functional as F
 import SimpleITK as sitk
 from medpy import metric
 from scipy.ndimage import zoom
@@ -18,8 +19,48 @@ def calculate_metric_percase(pred, gt):
     else:
         return 0, np.inf
 
-
 def test_single_volume(
+    image,
+    label,
+    net,
+    classes,
+    multimask_output=True,
+    patch_size=[512, 512],
+    loss_fn=None,
+):
+    _, _, D, H, W = image.shape
+    image = image.to(net.device) # B, C, D, H, W
+    label = label.to(net.device) # B, D, H, W
+    image = image.squeeze(0).permute(1, 0, 2, 3) # D, C, H, W
+    label = label.squeeze(0) # D, H, W
+
+    resized_image = F.resize(image, patch_size, interpolation=F.InterpolationMode.BILINEAR)
+    resized_label = F.resize(label, patch_size, interpolation=F.InterpolationMode.NEAREST)
+
+    net.eval()
+    with torch.no_grad():
+        outputs = net(resized_image, multimask_output, patch_size[0])
+        output_masks = outputs["masks"]
+        prediction = output_masks.softmax(1).argmax(1)
+        prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
+
+    if loss_fn:
+        loss = loss_fn(output_masks, resized_label)
+    else:
+        loss = None
+
+    prediction = prediction.cpu().numpy()
+    label = label.cpu().numpy()
+
+    metric_list = []
+    for i in range(1, classes):
+        metric_list.append(
+            calculate_metric_percase(prediction == i, label == i)
+        )
+
+    return metric_list, loss
+
+def _test_single_volume(
     image,
     label,
     net,
@@ -129,8 +170,50 @@ def test_single_image(
         )
     return metric_list
 
-
 def test_single_volume_prompt(
+    image,
+    label,
+    net,
+    classes,
+    promptidx,
+    promptmode,
+    multimask_output=True,
+    patch_size=[512, 512],
+    loss_fn=None,
+):
+    _, _, D, H, W = image.shape
+    image = image.to(net.device) # B, C, D, H, W
+    label = label.to(net.device) # B, D, H, W
+    image = image.squeeze(0).permute(1, 0, 2, 3) # D, C, H, W
+    label = label.squeeze(0) # D, H, W
+
+    resized_image = F.resize(image, patch_size, interpolation=F.InterpolationMode.BILINEAR)
+    resized_label = F.resize(label, patch_size, interpolation=F.InterpolationMode.NEAREST)
+
+    net.eval()
+    with torch.no_grad():
+        outputs = net(resized_image, multimask_output, patch_size[0], promptidx, promptmode)
+        output_masks = outputs["masks"]
+        prediction = output_masks.softmax(1).argmax(1)
+        prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
+
+    if loss_fn:
+        loss = loss_fn(output_masks, resized_label)
+    else:
+        loss = None
+
+    prediction = prediction.cpu().numpy()
+    label = label.cpu().numpy()
+
+    metric_list = []
+    for i in range(1, classes):
+        metric_list.append(
+            calculate_metric_percase(prediction == i, label == i)
+        )
+
+    return metric_list, loss
+
+def _test_single_volume_prompt(
     image,
     label,
     net,

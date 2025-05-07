@@ -130,15 +130,24 @@ class ACDCDataset(BaseDataset):
         else:
             raise RuntimeError(f"Case {case}.h5 does not have label field")
 
-        label = np.int32(label)
+        image = torch.from_numpy(image).unsqueeze(0).float()
+        label = torch.from_numpy(label).unsqueeze(0).long()
 
-        data = {"image": image, "label": label}
+        if self.split == "train":
+            image = image.repeat(3, 1, 1)
+        else:
+            image = image.repeat(3, 1, 1, 1)
+
+
+        data: dict = {"image": image, "label": label}
 
         if self.transform:
             data = self.transform(data)
 
         if self.normalize and normalize:
             data = self.normalize(data)
+
+        data["label"] = data["label"].squeeze(0)
 
         data["case_name"] = self.samples_list[index].strip("\n")
 
