@@ -240,7 +240,7 @@ class CPCSAMTrainer(BaseTrainer):
         assert self.logger is not None
 
         if not self.log_path:
-            return
+            self.log_path = self.work_path / "log.txt"
 
         self.log_path = get_path(self.log_path)
 
