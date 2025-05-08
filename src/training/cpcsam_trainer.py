@@ -344,7 +344,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.logger.error("Dataset not found")
         return ref_dict[str(patiens_num)]
 
-    def _worker_init_fn(self,worker_id):
+    def _worker_init_fn(self, worker_id):
         random.seed(self.seed + worker_id)
 
     def get_data(self):
@@ -365,7 +365,6 @@ class CPCSAMTrainer(BaseTrainer):
             self.batch_size,
             self.batch_size - self.labeled_batch_size,
         )
-
 
         train_dataloader = DataLoader(
             dataset=train_dataset,
@@ -559,8 +558,9 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"dice_weight: {self.dice_weight}")
         self.logger.info(f"consistency_weight_1: {self.consistency_weight_1}")
         self.logger.info(f"consistency_weight_2: {self.consistency_weight_2}")
-        self.logger.info(f"early_stop_max_patience: {self.early_stop_max_patience}")
-
+        self.logger.info(
+            f"early_stop_max_patience: {self.early_stop_max_patience}"
+        )
 
         self._remove_config_file()
 
@@ -644,9 +644,7 @@ class CPCSAMTrainer(BaseTrainer):
 
     def on_train_epoch_end(self):
         if (self.current_epoch + 1) % self.save_freq_epoch == 0:
-            self.save_state_dict(
-                self.work_path / f"epoch_{self.current_epoch}"
-            )
+            self.save_state_dict(self.work_path / f"epoch_{self.current_epoch}")
 
         train_losses = (
             torch.stack([o["loss"] for o in self.epoch_train_outputs])
@@ -763,7 +761,6 @@ class CPCSAMTrainer(BaseTrainer):
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
 
-
         image_batch, label_batch = image_batch.to(self.device), label_batch.to(
             self.device
         )
@@ -856,11 +853,15 @@ class CPCSAMTrainer(BaseTrainer):
                 keepdim=False,
             ).long()
 
-            consistency_loss2 = self.supervised_loss(
-                outputs_round2_2[self.labeled_batch_size :], pseudo_outputs1
+            consistency_loss2, _, _ = self.supervised_loss(
+                outputs_round2_2[self.labeled_batch_size :],
+                pseudo_outputs1,
+                dice_weight=0.5,
             )
-            consistency_loss1_r = self.supervised_loss(
-                outputs_round2_1_r[self.labeled_batch_size :], pseudo_outputs1
+            consistency_loss1_r, _, _ = self.supervised_loss(
+                outputs_round2_1_r[self.labeled_batch_size :],
+                pseudo_outputs1,
+                dice_weight=0.5,
             )
 
             loss2 = (
@@ -932,11 +933,15 @@ class CPCSAMTrainer(BaseTrainer):
                 keepdim=False,
             )
 
-            consistency_loss1 = self.supervised_loss(
-                outputs_round3_1[self.labeled_batch_size :], pseudo_outputs2
+            consistency_loss1, _, _ = self.supervised_loss(
+                outputs_round3_1[self.labeled_batch_size :],
+                pseudo_outputs2,
+                dice_weight=0.5,
             )
-            consistency_loss2_r = self.supervised_loss(
-                outputs_round3_2_r[self.labeled_batch_size :], pseudo_outputs2
+            consistency_loss2_r, _, _ = self.supervised_loss(
+                outputs_round3_2_r[self.labeled_batch_size :],
+                pseudo_outputs2,
+                dice_weight=0.5,
             )
 
             loss3 = (
