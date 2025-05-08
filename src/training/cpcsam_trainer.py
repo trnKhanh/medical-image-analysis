@@ -613,7 +613,7 @@ class CPCSAMTrainer(BaseTrainer):
             mask_overlay_pil.save(str(sanity_path / f"{i + 1}.png"))
 
     def on_train_end(self):
-        self.save_state_dict(self.work_path / f"ckpt/final_model.pth")
+        self.save_state_dict(self.work_path / f"ckpt/final_model")
         self.logger.info("")
         self.logger.info("")
 
@@ -645,7 +645,7 @@ class CPCSAMTrainer(BaseTrainer):
     def on_train_epoch_end(self):
         if (self.current_epoch + 1) % self.save_freq_epoch == 0:
             self.save_state_dict(
-                self.work_path / f"epoch_{self.current_epoch}.pth"
+                self.work_path / f"epoch_{self.current_epoch}"
             )
 
         train_losses = (
@@ -715,10 +715,10 @@ class CPCSAMTrainer(BaseTrainer):
             self.logger.info(
                 f"New best metric ({self.save_metric_name}): {self._cur_valid_metric}"
             )
-            self.save_state_dict(self.work_path / "best_model.pth")
+            self.save_state_dict(self.work_path / "best_model")
             self.save_state_dict(
                 self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}.pth"
+                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}"
             )
             is_improved = True
 
@@ -727,10 +727,10 @@ class CPCSAMTrainer(BaseTrainer):
             self.logger.info(
                 f"New best prompt metric ({self.save_metric_name}): {self._cur_valid_prompt_metric}"
             )
-            self.save_state_dict(self.work_path / "best_model_prompt.pth")
+            self.save_state_dict(self.work_path / "best_model_prompt")
             self.save_state_dict(
                 self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}_prompt.pth"
+                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}_prompt"
             )
             is_improved = True
 
@@ -1167,7 +1167,7 @@ class CPCSAMTrainer(BaseTrainer):
 
     def save_state_dict(self, save_path: str | Path):
         save_path = get_path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.mkdir(parents=True, exist_ok=True)
 
         self.save_model_checkpoint(save_path / "model.pth")
 
