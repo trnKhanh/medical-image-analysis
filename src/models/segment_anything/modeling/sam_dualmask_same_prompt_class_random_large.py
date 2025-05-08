@@ -208,7 +208,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             torch.zeros(1) for _ in range(len(self.mask_decoders))
         ]
 
-        assemble_low_res_logits = torch.zeros(1)
+        assemble_low_res_logits = torch.zeros(1, device=self.device)
 
         for id, mask_decoder in enumerate(self.mask_decoders):
             if id == prompt_idx:

@@ -456,7 +456,12 @@ class CPCSAMTrainer(BaseTrainer):
                 **self.optimizer_kwargs,
             )
         elif self.optimizer_name == "adamw":
-            optimizer = torch.optim.AdamW(parameters, **self.optimizer_kwargs)
+            optimizer = torch.optim.AdamW(
+                parameters,
+                betas=(0.9, 0.999),
+                weight_decay=0.1,
+                **self.optimizer_kwargs,
+            )
         elif self.optimizer_name == "sgd":
             optimizer = torch.optim.SGD(
                 parameters,
@@ -756,6 +761,8 @@ class CPCSAMTrainer(BaseTrainer):
         return predicted_segmentation_onehot
 
     def train_step(self, sampled_batch):
+        self.model.train()
+
         self.logger.info(f"Iteration {self.current_iter}:")
 
         self.lr_scheduler.step(self.current_iter)
