@@ -22,17 +22,18 @@ class RandomGamma(BaseTransform):
 
         self.gamma = list(gamma)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         gamma = torch.rand(1) * (self.gamma[1] - self.gamma[0]) + self.gamma[0]
 
-        data = torch.pow(data, gamma)
+        image = torch.pow(image, gamma)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -54,15 +55,16 @@ class RandomContrast(BaseTransform):
         self.contrast = contrast
         self.fn = T.ColorJitter(contrast=self.contrast)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
-        data = self.fn(data)
+        image = self.fn(image)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -84,15 +86,16 @@ class RandomBrightness(BaseTransform):
         self.brightness = brightness
         self.fn = T.ColorJitter(contrast=self.brightness)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         data = self.fn(data)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -113,21 +116,22 @@ class RandomGaussianNoise(BaseTransform):
 
         self.sigma = list(sigma)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         sigma = (
             torch.rand(1).item() * (self.sigma[1] - self.sigma[0])
             + self.sigma[0]
         )
-        noise = torch.normal(0, sigma, size=data.shape)
+        noise = torch.normal(0, sigma, size=image.shape)
 
-        data = torch.clip(data + noise, 0, 1)
+        image = torch.clip(image + noise, 0, 1)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -148,11 +152,9 @@ class RandomGaussianBlur(BaseTransform):
 
         self.sigma = list(sigma)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         sigma = (
             torch.rand(1).item() * (self.sigma[1] - self.sigma[0])
@@ -161,13 +163,16 @@ class RandomGaussianBlur(BaseTransform):
 
         kernel_size = self._get_kernel_size(sigma)
 
-        data = F.gaussian_blur(
-            data,
-            [kernel_size] * (len(data.shape) - 1),
-            [sigma] * (len(data.shape) - 1),
+        image = F.gaussian_blur(
+            image,
+            [kernel_size] * (len(image.shape) - 1),
+            [sigma] * (len(image.shape) - 1),
         )
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def _get_kernel_size(self, sigma: float, truncate: float = 4.0):
         return self._round_to_odd(sigma * truncate + 0.5)
@@ -199,27 +204,28 @@ class SimulateLowRes(BaseTransform):
 
         self.upmodes = {1: "linear", 2: "bilinear", 3: "trilinear"}
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         scales = (
-            torch.rand(len(data.shape) - 1) * (self.scale[1] - self.scale[0])
+            torch.rand(len(image.shape) - 1) * (self.scale[1] - self.scale[0])
             + self.scale[0]
         ).tolist()
 
-        origin_sizes = data.shape[1:]
-        low_res_sizes = [int(s * i) for s, i in zip(scales, data.shape[1:])]
+        origin_sizes = image.shape[1:]
+        low_res_sizes = [int(s * i) for s, i in zip(scales, image.shape[1:])]
         low_res_data = interpolate(
-            data[None], low_res_sizes, mode="nearest-exact"
+            image[None], low_res_sizes, mode="nearest-exact"
         )
-        data = interpolate(
-            low_res_data, origin_sizes, mode=self.upmodes[data.ndim - 1]
+        image = interpolate(
+            low_res_data, origin_sizes, mode=self.upmodes[image.ndim - 1]
         )[0]
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {

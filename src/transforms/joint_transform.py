@@ -17,16 +17,17 @@ class JointResize(BaseTransform):
             image_size = image_size * 2
         self.image_size = list(image_size)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
-        data = F.resize(data, self.image_size, F.InterpolationMode.BILINEAR)
-        seg = F.resize(seg, self.image_size, F.InterpolationMode.NEAREST)
+        image = F.resize(image, self.image_size, F.InterpolationMode.BILINEAR)
+        label = F.resize(label, self.image_size, F.InterpolationMode.NEAREST)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -36,29 +37,61 @@ class JointResize(BaseTransform):
         }
         return params_dict
 
+class RandomRotation90(BaseTransform):
+    def __init__(self, axes: Tuple[int, int] = (-2, -1)):
+        assert axes[0] != axes[1]
+
+        self.axes = axes
+
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
+
+        k = int(torch.randint(0, 4, (1,)).item())
+        image = torch.rot90(image, k, self.axes)
+        label = torch.rot90(label, k, self.axes)
+
+        data["image"] = image
+        data["label"] = label
+
+        return data
+
+    def get_params_dict(self):
+        params_dict = {
+            RandomRotation90.__name__: {
+                "axes": self.axes,
+            }
+        }
+        return params_dict
+
 class MirrorTransform(BaseTransform):
-    def __init__(self, allowed_axes: Tuple[int, ...]):
-        self.allowed_axes = allowed_axes
+    def __init__(self, axes: int | Tuple[int, ...]):
+        if not isinstance(axes, Sequence):
+            axes = tuple([axes])
+        self.axes = axes
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
-        if len(self.allowed_axes) == 0:
-            return data, seg
+        if len(self.axes) == 0:
+            data["image"] = image
+            data["label"] = label
 
-        axes = [i + 1 for i in self.allowed_axes]
-        data = torch.flip(data, axes)
-        seg = torch.flip(data, axes)
+            return data
 
-        return data, seg
+        image = torch.flip(image, self.axes)
+        label = torch.flip(label, self.axes)
+
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
             MirrorTransform.__name__: {
-                "allowed_axes": self.allowed_axes,
+                "allowed_axes": self.axes,
             }
         }
         return params_dict
@@ -71,18 +104,19 @@ class RandomRotation(BaseTransform):
 
         self.degrees = list(degrees)
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
         angle = T.RandomRotation.get_params(self.degrees)
 
-        data = F.rotate(data, angle)
-        seg = F.rotate(seg, angle)
+        image = F.rotate(image, angle)
+        label = F.rotate(label, angle)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -99,17 +133,18 @@ class RandomCrop2D(BaseTransform):
             crop = (crop, crop)
         self.crop = crop
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
-        i, j, h, w = T.RandomCrop.get_params(data, self.crop)
-        data = F.crop(data, i, j, h, w)
-        seg = F.crop(seg, i, j, h, w)
+        i, j, h, w = T.RandomCrop.get_params(image, self.crop)
+        image = F.crop(image, i, j, h, w)
+        label = F.crop(label, i, j, h, w)
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {
@@ -142,21 +177,22 @@ class RandomAffine(BaseTransform):
         else:
             self.shear = None
 
-    def __call__(
-        self, data: torch.Tensor | Image.Image, seg: torch.Tensor | Image.Image
-    ):
-        data = image_to_tensor(data)
-        seg = image_to_tensor(seg)
+    def __call__(self, data: dict) -> dict:
+        image = image_to_tensor(data["image"])
+        label = image_to_tensor(data["label"])
 
-        _, h, w = data.shape
+        _, h, w = image.shape
 
         degree, translate, scale, shear = T.RandomAffine.get_params(
             self.degrees, self.translate, self.scale, self.shear, [h, w]
         )
-        data = F.affine(data, degree, list(translate), scale, list(shear))
-        seg = F.affine(seg, degree, list(translate), scale, list(shear))
+        image = F.affine(image, degree, list(translate), scale, list(shear))
+        label = F.affine(label, degree, list(translate), scale, list(shear))
 
-        return data, seg
+        data["image"] = image
+        data["label"] = label
+
+        return data
 
     def get_params_dict(self):
         params_dict = {

@@ -4,62 +4,55 @@ import torch
 from torch import nn
 
 
-class SoftDiceLoss(nn.Module):
-    def __init__(
-        self,
-        apply_nonlin: Callable | None = None,
-        batch_dice: bool = False,
-        do_bg: bool = True,
-        smooth: float = 1.0,
-        # ddp: bool = False,
-        clip_tp: float | None = None,
-    ):
-        """ """
-        super(SoftDiceLoss, self).__init__()
-
-        self.do_bg = do_bg
-        self.batch_dice = batch_dice
-        self.apply_nonlin = apply_nonlin
+class DiceLoss(nn.Module):
+    def __init__(self, num_classes: int, smooth: float = 1e-5, do_bg: bool = False):
+        super(DiceLoss, self).__init__()
+        self.num_classes = num_classes + 1 # Include background
         self.smooth = smooth
-        self.clip_tp = clip_tp
-        # self.ddp = ddp
+        self.do_bg = do_bg
 
-    def forward(self, x, y, loss_mask=None):
-        shp_x = x.shape
+    def _one_hot_encoder(self, input_tensor: torch.Tensor):
+        input_tensor = input_tensor.unsqueeze(1)
+        y_onehot = torch.zeros_like(input_tensor, dtype=torch.long)
+        y_onehot = y_onehot.expand(-1, self.num_classes, -1, -1)
+        y_onehot = torch.scatter(y_onehot, 1, input_tensor.long(), 1)
+        return y_onehot.float()
 
-        if self.batch_dice:
-            axes = [0] + list(range(2, len(shp_x)))
-        else:
-            axes = list(range(2, len(shp_x)))
+    def _dice_loss(self, score: torch.Tensor, target: torch.Tensor):
+        target = target.float()
+        intersect = torch.sum(score * target)
+        target_sum = torch.sum(target * target)
+        score_sum = torch.sum(score * score)
+        loss = (2 * intersect + self.smooth) / (score_sum + target_sum + self.smooth)
+        loss = 1 - loss
+        return loss
 
-        if self.apply_nonlin is not None:
-            x = self.apply_nonlin(x)
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        target: torch.Tensor,
+        weight: list[float] | None = None,
+        softmax: bool = False,
+    ):
+        if softmax:
+            inputs = torch.softmax(inputs, dim=1)
+        target = self._one_hot_encoder(target)
 
-        tp, fp, fn, _ = get_tp_fp_fn_tn(x, y, axes, loss_mask, False)
+        if weight is None:
+            weight = [1.0] * self.num_classes
 
-        # if self.ddp and self.batch_dice:
-        #     tp = AllGatherGrad.apply(tp).sum(0)
-        #     fp = AllGatherGrad.apply(fp).sum(0)
-        #     fn = AllGatherGrad.apply(fn).sum(0)
-
-        if self.clip_tp is not None:
-            tp = torch.clip(tp, min=self.clip_tp, max=None)
-
-        nominator = 2 * tp
-        denominator = 2 * tp + fp + fn
-
-        dc = (nominator + self.smooth) / (
-            torch.clip(denominator + self.smooth, 1e-8)
+        assert (
+            inputs.size() == target.size()
+        ), "predict {} & target {} shape do not match".format(
+            inputs.size(), target.size()
         )
 
-        if not self.do_bg:
-            if self.batch_dice:
-                dc = dc[1:]
-            else:
-                dc = dc[:, 1:]
-        dc = dc.mean()
-
-        return -dc
+        loss = 0.0
+        start_index = 1 if self.do_bg else 0
+        for i in range(start_index, self.num_classes):
+            dice = self._dice_loss(inputs[:, i], target[:, i])
+            loss += dice * weight[i]
+        return loss / self.num_classes
 
 
 class MemoryEfficientSoftDiceLoss(nn.Module):
@@ -167,7 +160,6 @@ def get_tp_fp_fn_tn(net_output, gt, axes=None, mask=None, square=False):
                 net_output.shape, device=net_output.device, dtype=torch.bool
             )
             y_onehot.scatter_(1, gt.long(), 1)
-
 
     tp = net_output * y_onehot
     fp = net_output * (~y_onehot)

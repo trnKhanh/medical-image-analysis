@@ -21,7 +21,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
-from datasets.fugc import FUGCDataset
+from datasets import LA2018Dataset
 from losses.compound_losses import DC_and_CE_loss
 from losses.dice import MemoryEfficientSoftDiceLoss, get_tp_fp_fn_tn
 from metric.metric import HD
@@ -48,38 +48,44 @@ from transforms.joint_transform import (
 from transforms.common import RandomTransform, ComposeTransform
 
 
-class UNetTrainer(BaseTrainer):
+class SemiTrainer(BaseTrainer):
     def __init__(
         self,
         work_path: Path | str = Path.cwd(),
         device: torch.device | str = torch.device("cuda"),
         seed: int = 12345,
         # Model parameters
+        model_cls=UNet,
+        in_channels: int = 3,
         num_classes: int = 2,
+        patch_size: int | tuple[int, int] | None = None,
         image_size: int | tuple[int, int] | None = None,
         pretrained_model: Path | str | None = None,
         # Data parameters
-        data_path: Path | str | list[Path] | list[str] = "data",
-        data_split_dicts: Path | str | dict | None = None,
-        data_num_folds: int | None = None,
-        data_fold: int | str | None = None,
-        data_valid_rate: float = 0.0,
-        data_oversample: int = 10,
-        data_augment: bool = True,
-        data_normalize: bool = True,
+        data_path: Path | str = "data",
+        split_dict: Path | str | dict | None = None,
+        num_folds: int | None = None,
+        current_fold: int | str | None = None,
+        labeled_ratio: float = 1.0,
+        valid_ratio: float = 0.0,
+        oversample_factor: int = 1,
+        do_augment: bool = False,
+        do_normalize: bool = False,
         batch_size: int = 32,
         num_workers: int = 1,
-        pin_memory: bool = False,
-        # Optimizer parameters
+        pin_memory: bool = True,
+        # Training parameters
         optimizer: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
-        warmup_steps: int = 0,
+        num_epochs: int = 1000,
+        warmup_epochs: int = 0,
         start_lr: float = 1e-3,
         lr_scheduler: Literal["poly"] = "poly",
-        # Train parameters
-        num_epochs: int = 1000,
         save_freq: int = 10,
-        patient: int = 200,
+        save_metric: Literal["hd", "loss"] = "loss",
+        early_stop_patient: int = 200,
+        # Inference parameters
+        stride: int | tuple[int, ...] | list[int] | None = None,
         # Log parameters
         verbose: bool = True,
         log_path: Path | str | None = None,
@@ -90,45 +96,49 @@ class UNetTrainer(BaseTrainer):
         self.device = torch.device("cpu")
         self.to(device)
 
-        self.seed = seed
-        torch.manual_seed(self.seed)
+        self._set_seed(seed)
 
         # >>> Model parameters
+        self.model_cls = model_cls
+        self.in_channels = in_channels
         self.num_classes = num_classes
+        self.patch_size = patch_size
         self.image_size = image_size
         self.pretrained_model = pretrained_model
         # <<< Model parameters
 
         # >>> Data parameters
-        if not isinstance(data_path, list):
-            data_path = [get_path(data_path)]
         self.data_path = data_path
-        self.data_split_dicts = data_split_dicts
-        self.data_num_folds = data_num_folds
-        self.data_fold = data_fold
-        self.data_valid_rate = data_valid_rate
-        self.data_oversample = data_oversample
-        self.data_augment = data_augment
-        self.data_normalize = data_normalize
+        self.split_dicts = split_dict
+        self.num_folds = num_folds
+        self.current_fold = current_fold
+        self.labeled_ratio = labeled_ratio
+        self.valid_ratio = valid_ratio
+        self.oversample_factor = oversample_factor
+        self.do_augment = do_augment
+        self.do_normalize = do_normalize
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         # <<< Data parameters
 
-        # >>> Optimizer parameters
+        # >>> Training parameters
         self.optimizer = optimizer
         self.optimizer_kwargs = optimizer_kwargs
-        self.warmup_steps = warmup_steps
+        self.num_epochs = num_epochs
+        self.warmup_epochs = warmup_epochs
         self.start_lr = start_lr
         self.lr_scheduler = lr_scheduler
-        # <<< Optimizer parameters
-
-        # >>> Train parameters
-        self.current_epoch = 0
-        self.num_epochs = num_epochs
         self.save_freq = save_freq
-        self.patient = patient
-        # <<< Train parameters
+        self.save_metric = save_metric
+        self.early_stop_patient = early_stop_patient
+
+        self.current_epoch = 0
+        # <<< Training parameters
+
+        # >>> Inference parameters
+        self.stride = stride
+        # <<< Inference parameters
 
         # >>> Log parameters
         self.verbose = verbose
@@ -142,20 +152,19 @@ class UNetTrainer(BaseTrainer):
         self._setup_split_dict()
         self.model = self._build_model()
 
-        self.metric = HD()
+    def _set_seed(self, seed: int):
+        self.seed = seed
+        torch.manual_seed(seed)
 
     def _setup_logger(self):
-        self.logger = logging.getLogger("MIA.UNetTrainer")
+        self.logger = logging.getLogger("MIA.SemiTrainer")
         self.logger.setLevel(logging.DEBUG)
 
         self._setup_log_file()
         self._setup_log_shell()
 
     def _setup_log_file(self):
-        if self.logger is None:
-            raise RuntimeError(
-                "UNetTrainer logger is not initialized before setting up log file"
-            )
+        assert self.logger is not None
 
         if not self.log_path:
             return
@@ -163,7 +172,7 @@ class UNetTrainer(BaseTrainer):
         self.log_path = get_path(self.log_path)
 
         if self.log_path.exists() and not self.log_override:
-            current_time_str = datetime.now().strftime("%d%m%Y_%H%M%S")
+            current_time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.log_path = (
                 self.log_path.parent
                 / f"{self.log_path.stem}@{current_time_str}{self.log_path.suffix}"
@@ -178,26 +187,25 @@ class UNetTrainer(BaseTrainer):
         self.logger.addHandler(file_handler)
 
     def _setup_log_shell(self):
-        if self.logger is None:
-            raise RuntimeError(
-                "UNetTrainer logger is not initialized before setting up log file"
-            )
+        assert self.logger is not None
 
-        if self.verbose:
-            shell_handler = RichHandler(
-                console=Console(stderr=True),
-                rich_tracebacks=True,
-                show_time=False,
-                show_path=False,
-                show_level=False,
-                keywords=["Training summary", "Epoch", "Train", "Valid"],
-            )
-            shell_formatter = logging.Formatter(fmt="%(message)s")
-            shell_handler.setFormatter(shell_formatter)
-            self.logger.addHandler(shell_handler)
+        if not self.verbose:
+            return
+
+        shell_handler = RichHandler(
+            console=Console(stderr=True),
+            rich_tracebacks=True,
+            show_time=False,
+            show_path=False,
+            show_level=False,
+            keywords=["Training summary", "Epoch", "Train", "Valid"],
+        )
+        shell_formatter = logging.Formatter(fmt="%(message)s")
+        shell_handler.setFormatter(shell_formatter)
+        self.logger.addHandler(shell_handler)
 
     def _build_model(self, pretrained_model: str | Path | None = None):
-        self.model = UNet(3)
+        self.model = self.model_cls(self.in_channels)
         if pretrained_model:
             self.load_model_checkpoint(pretrained_model)
         self.model.init_head(self.num_classes)
@@ -205,70 +213,148 @@ class UNetTrainer(BaseTrainer):
     def _setup_split_dict(self):
         self.cur_split_dict_id = 0
         default_split_dict_path = self.work_path / "split_dicts.json"
+        split_dicts = None
 
         try:
-            if isinstance(self.data_split_dicts, (str, Path)):
-                with open(self.data_split_dicts, "r") as f:
-                    self.data_split_dicts = json.load(f)
+            if isinstance(self.split_dicts, (str, Path)):
+                with open(self.split_dicts, "r") as f:
+                    split_dicts = json.load(f)
         except:
-            self.data_split_dicts = None
+            split_dicts = None
 
-        if self.data_split_dicts:
-            if not isinstance(self.data_split_dicts, list):
-                self.data_split_dicts = [self.data_split_dicts]
-        elif self.data_num_folds:
-            self.data_split_dicts = self._get_cross_split_dicts(
-                self.data_num_folds
-            )
-            if self.data_fold is not None and isinstance(self.data_fold, int):
-                self.data_split_dicts = [self.data_split_dicts[self.data_fold]]
+        if split_dicts:
+            if not isinstance(split_dicts, list):
+                split_dicts = [split_dicts]
+        elif self.num_folds:
+            split_dicts = self._get_cross_split_dicts(self.num_folds)
+            if self.current_fold is not None and isinstance(
+                self.current_fold, int
+            ):
+                split_dicts = [split_dicts[self.current_fold]]
 
         else:
-            self.data_split_dicts = [
-                self._get_random_split_dict(self.data_valid_rate)
-            ]
+            split_dicts = [self._get_random_split_dict()]
+
+        self._assert_mutual_exclusive(split_dicts)
+
         with open(default_split_dict_path, "w") as f:
-            json.dump(self.data_split_dicts, f)
-        self._assert_no_data_leak()
+            json.dump(split_dicts, f, indent=2)
 
-    def _assert_no_data_leak(self):
-        assert isinstance(
-            self.data_split_dicts, list
-        ), "split_dicts must be a list"
+        self.split_dicts = split_dicts
 
-        for id, split_dict in enumerate(self.data_split_dicts):
-            for subset in split_dict.values():
-                samples = set(subset["train"] + subset["valid"])
-                assert len(samples) == len(subset["train"]) + len(
-                    subset["valid"]
-                ), f"data leaking in fold {id}"
+    def _get_random_split_dict(self):
+        assert self.valid_ratio >= 0
+        assert self.labeled_ratio >= 0
+
+        split_dict = {"labeled": [], "unlabeled": [], "valid": []}
+        samples = []
+        samples.extend(
+            LA2018Dataset.find_samples(self.data_path, require_label=False)
+        )
+        samples_with_gt = [s for s in samples if s["labeled"]]
+        samples_without_gt = [s for s in samples if not s["labeled"]]
+
+        # Valid set is a part of samples set with ground truth
+        valid_size = int(len(samples_with_gt) * self.valid_ratio)
+        # Train set is the remaining samples
+        train_size = len(samples) - valid_size
+        # The labeled set of train set is limited to samples with ground truth
+        labeled_size = min(
+            train_size * self.labeled_ratio, len(samples_with_gt) - valid_size
+        )
+
+        # Shuffle the samples with ground truth
+        perm_ids = torch.randperm(len(samples_with_gt))
+        valid_ids = perm_ids[:valid_size]
+        labeled_ids = perm_ids[valid_size : valid_size + labeled_size]
+
+        for sample_id in range(len(samples_with_gt)):
+            if sample_id in valid_ids:
+                split_dict["valid"].append(samples_with_gt[sample_id])
+            elif sample_id in labeled_ids:
+                split_dict["labeled"].append(samples_with_gt[sample_id])
+            else:
+                split_dict["unlabeled"].append(samples_with_gt[sample_id])
+
+        # The samples without ground truth is in the unlabeled set
+        split_dict["unlabeled"].extend(samples_without_gt)
+
+        return split_dict
+
+    def _get_cross_split_dicts(
+        self,
+    ):
+        assert self.num_folds and self.num_folds >= 2
+
+        split_dicts = [{} for _ in range(self.num_folds)]
+        samples = []
+        samples.extend(
+            LA2018Dataset.find_samples(self.data_path, require_label=False)
+        )
+        samples_with_gt = [s for s in samples if s["labeled"]]
+        samples_without_gt = [s for s in samples if not s["labeled"]]
+
+        # Valid set is a part of samples set with ground truth
+        valid_size = int(len(samples_with_gt) / self.num_folds)
+        # Train set is the remaining samples
+        train_size = len(samples) - valid_size
+        # The labeled set of train set is limited to samples with ground truth
+        labeled_size = min(
+            train_size * self.labeled_ratio, len(samples_with_gt) - valid_size
+        )
+
+        perm_ids = torch.randperm(len(samples_without_gt))
+
+        for i in range(self.num_folds):
+            split_dict = {"labeled": [], "unlabeled": [], "valid": []}
+            start_id = i * valid_size
+            end_id = (i + 1) * valid_size
+            valid_ids = perm_ids[start_id:end_id]
+            labeled_ids = torch.cat([perm_ids[:start_id], perm_ids[end_id]])[
+                :labeled_size
+            ]
+
+            for sample_id in range(len(samples)):
+                if sample_id in valid_ids:
+                    split_dict["valid"].append(samples_with_gt[sample_id])
+                elif sample_id in labeled_ids:
+                    split_dict["labeled"].append(samples_with_gt[sample_id])
+                else:
+                    split_dict["unlabeled"].append(samples_with_gt[sample_id])
+            split_dicts[i] = split_dict
+
+        return split_dicts
+
+    def _assert_mutual_exclusive(self, split_dicts: list[dict]):
+        assert isinstance(split_dicts, list), "split_dict must be a list"
+
+        for id, split_dict in enumerate(split_dicts):
+            for dataset_name, subsets in split_dict.items():
+                intersect = len(set(subsets["train"] + subsets["valid"]))
+                total = len(subsets["train"]) + len(subsets["valid"])
+
+                assert (
+                    intersect == total
+                ), f"Mutual samples in split_dict[{id}]/{dataset_name}"
 
     def _setup_seed(self, seed: int):
         torch.manual_seed(seed)
 
     def get_data(self, id: int = 0):
-        assert isinstance(
-            self.data_split_dicts, list
-        ), "data_split_dict is not initialized"
-        split_dict = self.data_split_dicts[id]
+        assert isinstance(self.split_dicts, list)
+        split_dict = self.split_dicts[id]
 
-        train_datasets = []
-        for data_path in self.data_path:
-            train_datasets.append(
-                FUGCDataset(
-                    data_path=data_path,
-                    transform=self._get_train_transform(),
-                    normalize=self._get_train_normalize(),
-                    split="train",
-                    split_dict=split_dict[str(data_path)],
-                    logger=self.logger,
-                    oversample=self.data_oversample,
-                )
-            )
-        train_dataset = ConcatDataset(train_datasets)
+        labeled_dataset = LA2018Dataset(
+            data_path=self.data_path,
+            require_label=False,
+            transform=self._get_train_transform(),
+            normalize=self._get_train_normalize(),
+            sample_ids=split_dict["labeled"],
+            logger=self.logger,
+        )
 
-        train_dataloader = DataLoader(
-            dataset=train_dataset,
+        labeled_dataloader = DataLoader(
+            dataset=labeled_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             drop_last=True,
@@ -276,20 +362,32 @@ class UNetTrainer(BaseTrainer):
             pin_memory=self.pin_memory,
         )
 
-        valid_datasets = []
-        for data_path in self.data_path:
-            valid_datasets.append(
-                FUGCDataset(
-                    data_path=data_path,
-                    transform=self._get_valid_transform(),
-                    normalize=self._get_valid_normalize(),
-                    split="valid",
-                    split_dict=split_dict[str(data_path)],
-                    logger=self.logger,
-                    oversample=self.data_oversample,
-                )
-            )
-        valid_dataset = ConcatDataset(valid_datasets)
+        unlabeled_dataset = LA2018Dataset(
+            data_path=self.data_path,
+            require_label=False,
+            transform=self._get_train_transform(),
+            normalize=self._get_train_normalize(),
+            sample_ids=split_dict["unlabeled"],
+            logger=self.logger,
+        )
+
+        unlabeled_dataloader = DataLoader(
+            dataset=unlabeled_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+        )
+
+        valid_dataset = LA2018Dataset(
+            data_path=self.data_path,
+            require_label=False,
+            transform=self._get_valid_transform(),
+            normalize=self._get_valid_transform(),
+            sample_ids=split_dict["valid"],
+            logger=self.logger,
+        )
 
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
@@ -300,7 +398,14 @@ class UNetTrainer(BaseTrainer):
             pin_memory=self.pin_memory,
         )
 
-        return train_dataloader, valid_dataloader, train_dataset, valid_dataset
+        return (
+            labeled_dataset,
+            labeled_dataloader,
+            unlabeled_dataset,
+            unlabeled_dataloader,
+            valid_dataset,
+            valid_dataloader,
+        )
 
     def _get_train_transform(self):
         transforms = []
@@ -352,65 +457,6 @@ class UNetTrainer(BaseTrainer):
             return ZScoreNormalize()
         else:
             return None
-
-    def _get_random_split_dict(
-        self,
-        valid_rate: float = 0.0,
-    ):
-        assert (
-            valid_rate >= 0
-        ), f"valid_rate must be a non-negative float (>=0). Found {valid_rate}"
-        split_dicts = {}
-        for data_path in self.data_path:
-            self.logger.info(f"Setting up split dict for {str(data_path)}")
-            split_dict = {"train": [], "valid": []}
-            samples = []
-            samples.extend(FUGCDataset.get_samples(data_path))
-
-            perm_ids = torch.randperm(len(samples))
-
-            valid_size = int(len(samples) * valid_rate)
-            valid_ids = perm_ids[:valid_size]
-
-            for sample_id in range(len(samples)):
-                if sample_id in valid_ids:
-                    split_dict["valid"].append(samples[sample_id])
-                else:
-                    split_dict["train"].append(samples[sample_id])
-
-            split_dicts[str(data_path)] = split_dict
-
-        return split_dicts
-
-    def _get_cross_split_dicts(
-        self,
-        num_folds: int = 5,
-    ):
-        assert (
-            num_folds >= 2
-        ), f"num_folds must be a postive integer >= 2. Found {num_folds}"
-        split_dicts = [{} for _ in range(num_folds)]
-        for data_path in self.data_path:
-            self.logger.info(f"Setting up split dict for {str(data_path)}")
-            samples = []
-            samples.extend(FUGCDataset.get_samples(data_path))
-
-            perm_ids = torch.randperm(len(samples))
-            samples_per_split = int(len(samples) / num_folds)
-
-            for i in range(num_folds):
-                split_dict = {"train": [], "valid": []}
-                start_id = i * samples_per_split
-                end_id = (i + 1) * samples_per_split
-                valid_ids = perm_ids[start_id:end_id]
-
-                for sample_id in range(len(samples)):
-                    if sample_id in valid_ids:
-                        split_dict["valid"].append(samples[sample_id])
-                    else:
-                        split_dict["train"].append(samples[sample_id])
-                split_dicts[i][str(data_path)] = split_dict
-        return split_dicts
 
     def _get_optimizer(
         self, optimizer: str, lr_scheduler: str, model: nn.Module, **kwargs
@@ -760,17 +806,13 @@ class UNetTrainer(BaseTrainer):
                 break
             self.on_epoch_start()
             self.on_train_epoch_start()
-            for sampled_batch in self.train_tqdm:
-                data = sampled_batch["image"] 
-                target = sampled_batch["label"]
+            for data, target in self.train_tqdm:
                 self.train_step(data, target)
             self.on_train_epoch_end()
 
             with torch.no_grad():
                 self.on_valid_epoch_start()
-                for sampled_batch in self.valid_tqdm:
-                    data = sampled_batch["image"] 
-                    target = sampled_batch["label"]
+                for data, target in self.valid_tqdm:
                     self.valid_step(data, target)
                 self.on_valid_epoch_end()
             self.on_epoch_end()
@@ -801,7 +843,9 @@ class UNetTrainer(BaseTrainer):
         }
 
     def load_model_checkpoint(self, pretrained_model: str | Path):
-        state_dict = torch.load(pretrained_model, map_location="cpu", weights_only=True)
+        state_dict = torch.load(
+            pretrained_model, map_location="cpu", weights_only=True
+        )
         try:
             if "model" in state_dict:
                 self.model.load_state_dict(state_dict["model"], strict=False)
@@ -811,7 +855,6 @@ class UNetTrainer(BaseTrainer):
         except Exception as e:
             self.logger.warn("Load model checkpoint failed")
             self.logger.exception(e)
-
 
     def load_state_dict(self, save_path: str | Path):
         state_dict = torch.load(save_path, map_location="cpu")
