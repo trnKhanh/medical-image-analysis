@@ -777,193 +777,112 @@ class CPCSAMTrainer(BaseTrainer):
             self.image_size,
             image_embeddings=image_embeddings,
         )
+        num_decoders = len(self.model.sam.mask_decoders)
 
-        outputs1 = outputs["low_res_logits1"]
-        outputs2 = outputs["low_res_logits2"]
-
-        labeled_outputs1 = outputs1[: self.labeled_batch_size]
-        labeled_outputs2 = outputs2[: self.labeled_batch_size]
         labeled_label_batch = label_batch[: self.labeled_batch_size]
 
-        supervised_loss1, loss_ce1, loss_dice1 = self.supervised_loss(
-            labeled_outputs1,
-            labeled_label_batch,
-            self.dice_weight,
-        )
-        supervised_loss2, loss_ce2, loss_dice2 = self.supervised_loss(
-            labeled_outputs2,
-            labeled_label_batch,
-            self.dice_weight,
-        )
-        loss1 = supervised_loss1 + supervised_loss2
+        loss1 = torch.zeros(1, device=self.device)
+        for i in range(num_decoders):
+            low_res_logits = outputs["low_res_logits"][i]
+            labeled_low_res_logits = low_res_logits[: self.labeled_batch_size]
+            supervised_loss, _, _ = self.supervised_loss(
+                labeled_low_res_logits,
+                labeled_label_batch,
+                self.dice_weight,
+            )
+            loss1 += supervised_loss
 
         # the second round
-        if self.current_iter < self.warmup_iter:
-            supervised_round2_loss1 = torch.zeros(1, device=self.device)
-            loss_round2_ce1 = torch.zeros(1, device=self.device)
-            loss_round2_dice1 = torch.zeros(1, device=self.device)
+        supervised_loss_round2 = torch.zeros(1, device=self.device)
+        supervised_loss_round2_r = torch.zeros(1, device=self.device)
 
-            supervised_round2_loss1_r = torch.zeros(1, device=self.device)
-            loss_round2_ce1_r = torch.zeros(1, device=self.device)
-            loss_round2_dice1_r = torch.zeros(1, device=self.device)
+        consistency_loss_round2 = torch.zeros(1, device=self.device)
+        consistency_loss_round2_r = torch.zeros(1, device=self.device)
 
-            consistency_loss2 = torch.zeros(1, device=self.device)
-            consistency_loss1_r = torch.zeros(1, device=self.device)
-            loss2 = torch.zeros(1, device=self.device)
-        else:
-            outputs_round2 = self.model(
-                image_batch,
-                multimask_output,
-                self.image_size,
-                1,
-                self.promptmode,
-                image_embeddings=image_embeddings,
-            )
-            outputs_round2_1 = outputs_round2["low_res_logits1"]
-            outputs_round2_1_r = outputs_round2["low_res_logits1_r"]
-            outputs_round2_2 = outputs_round2["low_res_logits2"]
-            outputs_round2_soft1 = torch.softmax(outputs_round2_1, dim=1)
-            outputs_round2_soft1_r = torch.softmax(outputs_round2_1_r, dim=1)
-            outputs_round2_soft2 = torch.softmax(outputs_round2_2, dim=1)
+        loss2 = torch.zeros(1, device=self.device)
 
-            labeled_outputs_round2_1 = outputs_round2_1[
-                : self.labeled_batch_size
-            ]
-            labeled_outputs_round2_1_r = outputs_round2_1_r[
-                : self.labeled_batch_size
-            ]
+        if self.current_iter >= self.warmup_iter:
+            for prompt_idx in range(num_decoders):
+                outputs_round2 = self.model(
+                    image_batch,
+                    multimask_output,
+                    self.image_size,
+                    prompt_idx,
+                    self.promptmode,
+                    image_embeddings,
+                )
+                low_res_logits_prompt = outputs_round2["low_res_logits"][
+                    prompt_idx
+                ]
+                low_res_logits_prompt_r = outputs_round2["low_res_logits_r"][
+                    prompt_idx
+                ]
 
-            supervised_round2_loss1, loss_round2_ce1, loss_round2_dice1 = (
-                self.supervised_loss(
-                    labeled_outputs_round2_1,
+                # Compute the supervised loss of the prompt output
+                labeled_low_res_logits_prompt = low_res_logits_prompt[
+                    : self.labeled_batch_size
+                ]
+                labeled_low_res_logits_prompt_r = low_res_logits_prompt_r[
+                    : self.labeled_batch_size
+                ]
+
+                supervised_loss, _, _ = self.supervised_loss(
+                    labeled_low_res_logits_prompt,
                     labeled_label_batch,
                     self.dice_weight,
                 )
-            )
+                supervised_loss_r, _, _ = self.supervised_loss(
+                    labeled_low_res_logits_prompt_r,
+                    labeled_label_batch,
+                    self.dice_weight,
+                )
 
-            (
-                supervised_round2_loss1_r,
-                loss_round2_ce1_r,
-                loss_round2_dice1_r,
-            ) = self.supervised_loss(
-                labeled_outputs_round2_1_r,
-                labeled_label_batch,
-                self.dice_weight,
-            )
+                supervised_loss_round2 += supervised_loss
+                supervised_loss_round2_r += supervised_loss_r
 
-            outputs_round2_soft1 = (
-                outputs_round2_soft1 + outputs_round2_soft1_r
-            ) / 2.0
-            pseudo_outputs1 = torch.argmax(
-                outputs_round2_soft1[self.labeled_batch_size :].detach(),
-                dim=1,
-                keepdim=False,
-            ).long()
+                # Compute the consistency loss between the prompt output and raw
+                # logits of other decoders
+                ensemble_low_res_logits_prompt = (
+                    low_res_logits_prompt.softmax(1)
+                    + low_res_logits_prompt_r.softmax(1)
+                ) / 2.0
+                pseudo_label_prompt = (
+                    ensemble_low_res_logits_prompt[self.labeled_batch_size :]
+                    .detach()
+                    .argmax(1)
+                    .long()
+                )
 
-            consistency_loss2, _, _ = self.supervised_loss(
-                outputs_round2_2[self.labeled_batch_size :],
-                pseudo_outputs1,
-                dice_weight=0.5,
-            )
-            consistency_loss1_r, _, _ = self.supervised_loss(
-                outputs_round2_1_r[self.labeled_batch_size :],
-                pseudo_outputs1,
-                dice_weight=0.5,
-            )
+                for id in range(num_decoders):
+                    if id != prompt_idx:
+                        consistency_loss, _, _ = self.supervised_loss(
+                            outputs_round2["low_res_logits"][id][
+                                self.labeled_batch_size :
+                            ],
+                            pseudo_label_prompt,
+                            0.5,
+                        )
+                        consistency_loss_round2 += consistency_loss
+
+                consistency_loss_r, _, _ = self.supervised_loss(
+                    low_res_logits_prompt_r[self.labeled_batch_size :],
+                    pseudo_label_prompt,
+                    0.5,
+                )
+                consistency_loss_round2_r += consistency_loss_r
 
             loss2 = (
-                supervised_round2_loss1
-                + supervised_round2_loss1_r
-                + self.consistency_weight_1 * consistency_loss2
-                + self.consistency_weight_2 * consistency_loss1_r
+                supervised_loss_round2
+                + supervised_loss_round2_r
+                + self.consistency_weight_1 * consistency_loss_round2
+                + self.consistency_weight_2 * consistency_loss_round2_r
             )
 
-        # the third round
-        if self.current_iter < self.warmup_iter:
-            supervised_round3_loss2 = torch.zeros(1, device=self.device)
-            loss_round3_ce1 = torch.zeros(1, device=self.device)
-            loss_round3_dice1 = torch.zeros(1, device=self.device)
-
-            supervised_round3_loss2_r = torch.zeros(1, device=self.device)
-            loss_round3_ce1_r = torch.zeros(1, device=self.device)
-            loss_round3_dice1_r = torch.zeros(1, device=self.device)
-
-            consistency_loss1 = torch.zeros(1, device=self.device)
-            consistency_loss2_r = torch.zeros(1, device=self.device)
-            loss3 = torch.zeros(1, device=self.device)
-
-        else:
-            outputs_round3 = self.model(
-                image_batch,
-                multimask_output,
-                self.image_size,
-                0,
-                self.promptmode,
-                image_embeddings=image_embeddings,
-            )
-            outputs_round3_1 = outputs_round3["low_res_logits1"]
-            outputs_round3_2 = outputs_round3["low_res_logits2"]
-            outputs_round3_2_r = outputs_round3["low_res_logits2_r"]
-            outputs_round3_soft1 = torch.softmax(outputs_round3_1, dim=1)
-            outputs_round3_soft2 = torch.softmax(outputs_round3_2, dim=1)
-            outputs_round3_soft2_r = torch.softmax(outputs_round3_2_r, dim=1)
-
-            labeled_outputs_round3_2 = outputs_round3_2[
-                : self.labeled_batch_size
-            ]
-            labeled_outputs_round3_2_r = outputs_round3_2_r[
-                : self.labeled_batch_size
-            ]
-
-            supervised_round3_loss2, loss_round3_ce1, loss_round3_dice1 = (
-                self.supervised_loss(
-                    labeled_outputs_round3_2,
-                    labeled_label_batch,
-                    self.dice_weight,
-                )
-            )
-            (
-                supervised_round3_loss2_r,
-                loss_round3_ce1_r,
-                loss_round3_dice1_r,
-            ) = self.supervised_loss(
-                labeled_outputs_round3_2_r,
-                labeled_label_batch,
-                self.dice_weight,
-            )
-
-            outputs_round3_soft2 = (
-                outputs_round3_soft2 + outputs_round3_soft2_r
-            ) / 2.0
-            pseudo_outputs2 = torch.argmax(
-                outputs_round3_soft2[self.labeled_batch_size :].detach(),
-                dim=1,
-                keepdim=False,
-            )
-
-            consistency_loss1, _, _ = self.supervised_loss(
-                outputs_round3_1[self.labeled_batch_size :],
-                pseudo_outputs2,
-                dice_weight=0.5,
-            )
-            consistency_loss2_r, _, _ = self.supervised_loss(
-                outputs_round3_2_r[self.labeled_batch_size :],
-                pseudo_outputs2,
-                dice_weight=0.5,
-            )
-
-            loss3 = (
-                supervised_round3_loss2
-                + supervised_round3_loss2_r
-                + self.consistency_weight_1 * consistency_loss1
-                + self.consistency_weight_2 * consistency_loss2_r
-            )
-
-        loss = loss1 + loss2 + loss3
+        loss = loss1 + loss2
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        losses = torch.Tensor([loss, loss1, loss2, loss3])
+        losses = torch.Tensor([loss, loss1, loss2])
         self.logger.info(f"Loss: {losses.tolist()}")
         self.epoch_train_outputs.append({"loss": losses})
         self.current_iter += 1

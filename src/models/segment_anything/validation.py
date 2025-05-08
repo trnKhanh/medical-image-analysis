@@ -40,7 +40,7 @@ def test_single_volume(
     net.eval()
     with torch.no_grad():
         outputs = net(resized_image, multimask_output, patch_size[0])
-        output_masks = outputs["masks"]
+        output_masks = outputs["masks"][0]
         prediction = output_masks.softmax(1).argmax(1)
         prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
 
@@ -153,7 +153,7 @@ def test_single_image(
 
     with torch.no_grad():
         outputs = net(inputs, multimask_output, patch_size[0])
-        output_masks = outputs["masks"]
+        output_masks = outputs["masks"][0]
         out = torch.argmax(torch.softmax(output_masks, dim=1), dim=1).squeeze(0)
         out = out.cpu().detach().numpy()
         out_h, out_w = out.shape
@@ -193,7 +193,7 @@ def test_single_volume_prompt(
     net.eval()
     with torch.no_grad():
         outputs = net(resized_image, multimask_output, patch_size[0], promptidx, promptmode)
-        output_masks = outputs["masks"]
+        output_masks = outputs["masks"][0]
         prediction = output_masks.softmax(1).argmax(1)
         prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
 
@@ -326,11 +326,11 @@ def test_single_volume_scm(
         with torch.no_grad():
 
             outputs1 = net1(inputs, multimask_output, patch_size[0])
-            output_masks1 = outputs1["masks"]
+            output_masks1 = outputs1["masks"][0]
             output1 = torch.softmax(output_masks1, dim=1)
 
             outputs2 = net2(inputs, multimask_output, patch_size[0])
-            output_masks2 = outputs2["masks"]
+            output_masks2 = outputs2["masks"][1]
             output2 = torch.softmax(output_masks2, dim=1)
 
             conv_in = torch.cat([output1, output2], dim=1)
@@ -399,8 +399,8 @@ def test_single_volume_mean(
         net.eval()
         with torch.no_grad():
             outputs = net(inputs, multimask_output, patch_size[0])
-            output_masks1 = outputs["masks"]
-            output_masks2 = outputs["masks2"]
+            output_masks1 = outputs["masks"][0]
+            output_masks2 = outputs["masks"][1]
             output_masks1 = torch.softmax(output_masks1, dim=1)
             output_masks2 = torch.softmax(output_masks2, dim=1)
             output_masks = (output_masks1 + output_masks2) / 2.0
