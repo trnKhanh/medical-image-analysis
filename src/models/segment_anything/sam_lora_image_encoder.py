@@ -143,7 +143,7 @@ class LoRA_Sam(nn.Module):
 
         assert filename.endswith(".pt") or filename.endswith('.pth')
 
-        state_dict = torch.load(filename)
+        state_dict = torch.load(filename, weights_only=True)
 
         for i, w_A_linear in enumerate(self.w_As):
             saved_key = f"w_a_{i:03d}"

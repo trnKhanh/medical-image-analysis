@@ -319,7 +319,7 @@ class CPCSAMTrainer(BaseTrainer):
         if self.model is None:
             raise RuntimeError("Model is not built before saving checkpoint")
         try:
-            self.model.load_lora_parameters(str(lora_ckpt))
+            self.model.save_lora_parameters(str(lora_ckpt))
             self.logger.info(f"Saved model lora checkpoint to {lora_ckpt}")
         except Exception as e:
             self.logger.warn(
