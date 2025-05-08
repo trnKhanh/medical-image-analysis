@@ -770,7 +770,13 @@ class CPCSAMTrainer(BaseTrainer):
 
         # the first round
 
-        outputs = self.model(image_batch, multimask_output, self.image_size)
+        image_embeddings = self.model.sam.get_image_embeddings(image_batch)
+        outputs = self.model(
+            image_batch,
+            multimask_output,
+            self.image_size,
+            image_embeddings=image_embeddings,
+        )
 
         outputs1 = outputs["low_res_logits1"]
         outputs2 = outputs["low_res_logits2"]
@@ -790,20 +796,20 @@ class CPCSAMTrainer(BaseTrainer):
             self.dice_weight,
         )
         loss1 = supervised_loss1 + supervised_loss2
-        self.optimizer.zero_grad()
-        loss1.backward()
-        self.optimizer.step()
 
         # the second round
         if self.current_iter < self.warmup_iter:
-            supervised_round2_loss1 = loss_round2_ce1 = loss_round2_dice1 = 0
-            supervised_round2_loss1_r = loss_round2_ce1_r = (
-                loss_round2_dice1_r
-            ) = 0
+            supervised_round2_loss1 = torch.zeros(1, device=self.device)
+            loss_round2_ce1 = torch.zeros(1, device=self.device)
+            loss_round2_dice1 = torch.zeros(1, device=self.device)
 
-            consistency_loss2 = 0.0
-            consistency_loss1_r = 0.0
-            loss2 = 0.0
+            supervised_round2_loss1_r = torch.zeros(1, device=self.device)
+            loss_round2_ce1_r = torch.zeros(1, device=self.device)
+            loss_round2_dice1_r = torch.zeros(1, device=self.device)
+
+            consistency_loss2 = torch.zeros(1, device=self.device)
+            consistency_loss1_r = torch.zeros(1, device=self.device)
+            loss2 = torch.zeros(1, device=self.device)
         else:
             outputs_round2 = self.model(
                 image_batch,
@@ -811,6 +817,7 @@ class CPCSAMTrainer(BaseTrainer):
                 self.image_size,
                 1,
                 self.promptmode,
+                image_embeddings=image_embeddings,
             )
             outputs_round2_1 = outputs_round2["low_res_logits1"]
             outputs_round2_1_r = outputs_round2["low_res_logits1_r"]
@@ -870,20 +877,20 @@ class CPCSAMTrainer(BaseTrainer):
                 + self.consistency_weight_1 * consistency_loss2
                 + self.consistency_weight_2 * consistency_loss1_r
             )
-            self.optimizer.zero_grad()
-            loss2.backward()
-            self.optimizer.step()
 
         # the third round
         if self.current_iter < self.warmup_iter:
-            supervised_round3_loss2 = loss_round3_ce1 = loss_round3_dice1 = 0.0
-            supervised_round3_loss2_r = loss_round3_ce1_r = (
-                loss_round3_dice1_r
-            ) = 0.0
+            supervised_round3_loss2 = torch.zeros(1, device=self.device)
+            loss_round3_ce1 = torch.zeros(1, device=self.device)
+            loss_round3_dice1 = torch.zeros(1, device=self.device)
 
-            consistency_loss1 = 0.0
-            consistency_loss2_r = 0.0
-            loss3 = 0.0
+            supervised_round3_loss2_r = torch.zeros(1, device=self.device)
+            loss_round3_ce1_r = torch.zeros(1, device=self.device)
+            loss_round3_dice1_r = torch.zeros(1, device=self.device)
+
+            consistency_loss1 = torch.zeros(1, device=self.device)
+            consistency_loss2_r = torch.zeros(1, device=self.device)
+            loss3 = torch.zeros(1, device=self.device)
 
         else:
             outputs_round3 = self.model(
@@ -892,6 +899,7 @@ class CPCSAMTrainer(BaseTrainer):
                 self.image_size,
                 0,
                 self.promptmode,
+                image_embeddings=image_embeddings,
             )
             outputs_round3_1 = outputs_round3["low_res_logits1"]
             outputs_round3_2 = outputs_round3["low_res_logits2"]
@@ -950,11 +958,11 @@ class CPCSAMTrainer(BaseTrainer):
                 + self.consistency_weight_1 * consistency_loss1
                 + self.consistency_weight_2 * consistency_loss2_r
             )
-            self.optimizer.zero_grad()
-            loss3.backward()
-            self.optimizer.step()
 
         loss = loss1 + loss2 + loss3
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
         losses = torch.Tensor([loss, loss1, loss2, loss3])
         self.logger.info(f"Loss: {losses.tolist()}")
         self.epoch_train_outputs.append({"loss": losses})

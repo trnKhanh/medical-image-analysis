@@ -80,6 +80,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         image_size,
         prompt_idx=-1,
         prompt_mode=None,
+        image_embeddings=None,
     ):
         # prompt_idx indicates which branch is used to generate prompts
         if isinstance(batched_input, list):
@@ -91,6 +92,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 image_size,
                 prompt_idx,
                 prompt_mode,
+                image_embeddings
             )
         return outputs
 
@@ -162,11 +164,17 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
 
         return sparse_embeddings, sparse_embeddings_r, dense_embeddings
 
-    def forward_train(
-        self, batched_input, multimask_output, image_size, prompt_idx, prompt
-    ):
+    def get_image_embeddings(self, batched_input):
         input_images = self.preprocess(batched_input)
         image_embeddings = self.image_encoder(input_images)
+        return image_embeddings
+
+    def forward_train(
+        self, batched_input, multimask_output, image_size, prompt_idx, prompt, image_embeddings=None
+    ):
+        if image_embeddings is None:
+            image_embeddings = self.get_image_embeddings(batched_input)
+
         feature_dropout_rate = 0.0
 
         if prompt_idx >= 0:
