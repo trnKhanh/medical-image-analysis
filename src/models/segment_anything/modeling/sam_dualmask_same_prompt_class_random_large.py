@@ -41,6 +41,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         image_encoder: ImageEncoderViT,
         prompt_encoder: PromptEncoder_prompt_class,
         mask_decoders: list[MaskDecoder_prompt_large],
+        dropout_rate: float = 0.0,
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
         pixel_std: List[float] = [58.395, 57.12, 57.375],
     ) -> None:
@@ -66,6 +67,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         self.register_buffer(
             "pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False
         )
+        self.dropout_rate = dropout_rate
 
     @property
     def device(self) -> Any:
@@ -179,8 +181,6 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         if image_embeddings is None:
             image_embeddings = self.get_image_embeddings(batched_input)
 
-        feature_dropout_rate = 0.0
-
         if prompt_idx >= 0:
             prompt_iter = itertools.cycle(prompt)
             for i in range(prompt_idx + 1):
@@ -235,9 +235,12 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 )
             )
 
-            dropout_image_embeddings = F.dropout(
-                image_embeddings, feature_dropout_rate, self.training
-            )
+            if self.dropout_rate > 0:
+                dropout_image_embeddings = F.dropout(
+                    image_embeddings, self.dropout_rate, self.training
+                )
+            else:
+                dropout_image_embeddings = image_embeddings 
 
             (
                 low_res_logits[prompt_idx],

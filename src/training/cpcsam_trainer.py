@@ -85,6 +85,7 @@ class CPCSAMTrainer(BaseTrainer):
         lora_rank: int = 4,
         lora_ckpt: Path | str | None = None,
         promptmode: list[PROMPT_MODE] = ["point"],
+        dropout_rate: float = 0.0,
         # Data parameters
         data_path: Path | str = "data",
         labeled_ratio: float = 1.0,
@@ -138,6 +139,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.lora_rank = lora_rank
         self.lora_ckpt = lora_ckpt
         self.promptmode = promptmode
+        self.dropout_rate = dropout_rate
         # <<< Model parameters
 
         # >>> Data parameters
@@ -203,6 +205,7 @@ class CPCSAMTrainer(BaseTrainer):
             f"imagesize-{self.image_size}",
             f"lora-{self.lora_rank}",
             f"prompt-{self.promptmode}",
+            f"dropout-{self.dropout_rate}",
             f"labeled-{self.labeled_num}",
             f"batchsize-{self.batch_size}",
             f"optimizer-{self.optimizer_name}",
@@ -300,6 +303,7 @@ class CPCSAMTrainer(BaseTrainer):
             checkpoint=self.model_ckpt,
             pixel_mean=[0, 0, 0],
             pixel_std=[1, 1, 1],
+            dropout_rate=self.dropout_rate
         )
         self.model = LoRA_Sam(self.sam, self.lora_rank)
 
@@ -525,6 +529,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  lora_rank: {self.lora_rank}")
         self.logger.info(f"  lora_ckpt: {self.lora_ckpt}")
         self.logger.info(f"  promptmode: {self.promptmode}")
+        self.logger.info(f"  dropout_rate: {self.dropout_rate}")
 
         self.logger.info(f'data: "{self.data_path}"')
         self.logger.info(f"  train_size (slices): {len(self.train_dataset)}")
