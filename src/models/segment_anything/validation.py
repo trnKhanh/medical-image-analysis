@@ -45,7 +45,7 @@ def test_single_volume(
         prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
 
     if loss_fn:
-        loss = loss_fn(output_masks, resized_label)
+        loss, _, _ = loss_fn(output_masks, resized_label)
     else:
         loss = None
 
@@ -198,7 +198,7 @@ def test_single_volume_prompt(
         prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.BILINEAR)
 
     if loss_fn:
-        loss = loss_fn(output_masks, resized_label)
+        loss, _, _ = loss_fn(output_masks, resized_label)
     else:
         loss = None
 

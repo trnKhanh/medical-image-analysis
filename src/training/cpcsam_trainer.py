@@ -511,22 +511,28 @@ class CPCSAMTrainer(BaseTrainer):
         self._add_config_file()
 
         self.logger.info(f"Training summary")
-        self.logger.info(f"seed: {self.seed}")
+        self.logger.info("")
         self.logger.info(f"device: {self.device}")
-        self.logger.info(f"start_epoch: {self.current_epoch}")
-        self.logger.info(f"num_epochs: {self.num_epochs}")
+        self.logger.info(f"seed: {self.seed}")
         self.logger.info(f'log_file: "{self.log_path}"')
 
         self.logger.info(f"model: {self.model}")
-        self.logger.info(f"  pretrained_model: {self.model_ckpt}")
+        self.logger.info(f"  num_classes: {self.num_classes}")
+        self.logger.info(f"  patch_size: {self.patch_size}")
         self.logger.info(f"  image_size: {self.image_size}")
+        self.logger.info(f"  pretrained_model: {self.model_ckpt}")
+        self.logger.info(f"  sam_name: {self.sam_name}")
+        self.logger.info(f"  model_ckpt: {self.model_ckpt}")
+        self.logger.info(f"  lora_rank: {self.lora_rank}")
+        self.logger.info(f"  lora_ckpt: {self.lora_ckpt}")
+        self.logger.info(f"  promptmode: {self.promptmode}")
 
         self.logger.info(f'data: "{self.data_path}"')
-        self.logger.info(f"  train_slices: {len(self.train_dataset)}")
+        self.logger.info(f"  train_size (slices): {len(self.train_dataset)}")
         self.logger.info(
             f"  labeled_patients (slices): {self.labeled_num} ({self.patients_to_slices('ACDC', self.labeled_num)})"
         )
-        self.logger.info(f"  valid_slices: {len(self.valid_dataset)}")
+        self.logger.info(f"  valid_size (volumns): {len(self.valid_dataset)}")
         self.logger.info(f"  do_augment: {self.do_augment}")
         if self.do_augment:
             self.logger.info(
@@ -539,12 +545,22 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  pin_memory: {self.pin_memory}")
 
         self.logger.info(f"optimizer: {self.optimizer_name}")
-        self.logger.info(f"  warmup_iter: {self.warmup_iter}")
+        self.logger.info(f"  lr_warmup_iter: {self.lr_warmup_iter}")
         self.logger.info(f"  lr_scheduler: {self.lr_scheduler_name}")
         self.logger.info(f"  start_lr: {self.start_lr}")
         self.logger.info(f"  optimizer_kwargs: {self.optimizer_kwargs}")
         self.logger.info(f"loss_fn: {self.loss_name}")
         self.logger.info(f"save_metric: {self.save_metric_name}")
+        self.logger.info(f"start_epoch: {self.current_epoch}")
+        self.logger.info(f"num_epochs: {self.num_epochs}")
+        self.logger.info(f"warmup_iter: {self.warmup_iter}")
+        self.logger.info(f"save_freq_epoch: {self.save_freq_epoch}")
+        self.logger.info(f"valid_freq_iter: {self.valid_freq_iter}")
+        self.logger.info(f"dice_weight: {self.dice_weight}")
+        self.logger.info(f"consistency_weight_1: {self.consistency_weight_1}")
+        self.logger.info(f"consistency_weight_2: {self.consistency_weight_2}")
+        self.logger.info(f"early_stop_max_patience: {self.early_stop_max_patience}")
+
 
         self._remove_config_file()
 
@@ -657,7 +673,7 @@ class CPCSAMTrainer(BaseTrainer):
         ).mean(0)
         loss = torch.stack([o["loss"] for o in self.epoch_valid_outputs]).mean()
         prompt_metric = torch.stack(
-            [o["prompt_metric"][:, 0] for o in self.epoch_valid_outputs]
+            [o["prompt_metric"][:, :] for o in self.epoch_valid_outputs]
         ).mean(0)
         prompt_loss = torch.stack(
             [o["prompt_loss"] for o in self.epoch_valid_outputs]
@@ -1005,7 +1021,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.on_train_end()
 
     def valid(self):
-        if (self.current_iter + 1) % self.valid_freq_iter == 0:
+        if (self.current_iter) % self.valid_freq_iter == 0:
             with torch.no_grad():
                 self.on_valid_epoch_start()
                 for sampled_batch in self.valid_tqdm:
