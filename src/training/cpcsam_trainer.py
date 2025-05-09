@@ -108,6 +108,7 @@ class CPCSAMTrainer(BaseTrainer):
         save_freq_epoch: int = 100,
         valid_freq_iter: int = 200,
         save_metric_name: Literal["dice", "hd", "loss"] = "dice",
+        maximum_save_metric: bool | None = None,
         loss_name: Literal["dice+ce"] = "dice+ce",
         dice_weight: float = 0.8,
         consistency_weight_1: float = 0.4,
@@ -166,6 +167,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.save_freq_epoch = save_freq_epoch
         self.valid_freq_iter = valid_freq_iter
         self.save_metric_name = save_metric_name
+        self.maximum_save_metric = maximum_save_metric
         self.loss_name = loss_name
         self.dice_weight = dice_weight
         self.consistency_weight_1 = consistency_weight_1
@@ -195,6 +197,7 @@ class CPCSAMTrainer(BaseTrainer):
         self._build_model()
         if self.lora_ckpt:
             self.load_model_checkpoint(self.lora_ckpt)
+        self.model.to(self.device)
 
     def _set_snapshot_work_dir(self):
         current_time_str = datetime.now().strftime("%Y%m%d_%H")
@@ -303,7 +306,7 @@ class CPCSAMTrainer(BaseTrainer):
             checkpoint=self.model_ckpt,
             pixel_mean=[0, 0, 0],
             pixel_std=[1, 1, 1],
-            dropout_rate=self.dropout_rate
+            dropout_rate=self.dropout_rate,
         )
         self.model = LoRA_Sam(self.sam, self.lora_rank)
 
@@ -600,11 +603,24 @@ class CPCSAMTrainer(BaseTrainer):
         )
         self.supervised_loss, self.unsupervised_loss = self._get_loss()
 
-        self._best_valid_metric = torch.inf
-        self._cur_valid_metric = torch.inf
+        if self.maximum_save_metric is None:
+            if self.save_metric_name == "dice":
+                self.maximum_save_metric = True
+            elif self.save_metric_name == "hd":
+                self.maximum_save_metric = False
+            elif self.save_metric_name == "loss":
+                self.maximum_save_metric = False
+            else:
+                raise ValueError(
+                    f"{self.save_metric_name} is not a valid save metric"
+                )
 
-        self._best_valid_prompt_metric = torch.inf
-        self._cur_valid_prompt_metric = torch.inf
+        default_metric = -torch.inf if self.maximum_save_metric else torch.inf
+        self._best_valid_metric = default_metric
+        self._cur_valid_metric = default_metric
+
+        self._best_valid_prompt_metric = default_metric
+        self._cur_valid_prompt_metric = default_metric
 
         self._print_train_info()
         self._check_data_sanity()
@@ -675,6 +691,12 @@ class CPCSAMTrainer(BaseTrainer):
         self.valid_tqdm = tqdm(self.valid_dataloader)
         self.epoch_valid_outputs = []
 
+    def _is_improved(self, old_metric, new_metric, maximum):
+        if maximum:
+            return old_metric < new_metric
+        else:
+            return old_metric > new_metric
+
     def on_valid_epoch_end(self):
         metric = torch.stack(
             [o["metric"][:, :] for o in self.epoch_valid_outputs]
@@ -715,10 +737,16 @@ class CPCSAMTrainer(BaseTrainer):
         elif self.save_metric_name == "loss":
             self._cur_valid_metric = loss
             self._cur_valid_prompt_metric = prompt_loss
+        else:
+            raise ValueError(
+                f"{self.save_metric_name} is not a valid save metric"
+            )
 
         is_improved = False
 
-        if self._cur_valid_metric < self._best_valid_metric:
+        if self._is_improved(
+            self._best_valid_metric, self._cur_valid_metric, self.maximum_save_metric
+        ):
             self._best_valid_metric = self._cur_valid_metric
             self.logger.info(
                 f"New best metric ({self.save_metric_name}): {self._cur_valid_metric}"
@@ -730,7 +758,11 @@ class CPCSAMTrainer(BaseTrainer):
             )
             is_improved = True
 
-        if self._cur_valid_prompt_metric < self._best_valid_prompt_metric:
+        if self._is_improved(
+            self._best_valid_prompt_metric,
+            self._cur_valid_prompt_metric,
+            self.maximum_save_metric,
+        ):
             self._best_valid_prompt_metric = self._cur_valid_prompt_metric
             self.logger.info(
                 f"New best prompt metric ({self.save_metric_name}): {self._cur_valid_prompt_metric}"
@@ -749,6 +781,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self._valid_end_time = time.time()
         time_elapsed = self._valid_start_time - self._valid_start_time
+        self.logger.info(f"current_patience: {self.current_patience}")
         self.logger.info(f"Valid time elapsed: {time_elapsed:.3f} seconds")
 
     def _get_one_hot_output(self, output: torch.Tensor):
@@ -977,7 +1010,12 @@ class CPCSAMTrainer(BaseTrainer):
             return False
 
         if self.early_stop_max_patience:
-            return self.current_patience >= self.early_stop_max_patience
+            is_finished = self.current_patience >= self.early_stop_max_patience
+            if is_finished:
+                self.logger.info(
+                    "Exceeded maximum patience. Training will be early stopped"
+                )
+            return is_finished
 
         return self.current_epoch >= self.num_epochs
 
@@ -1003,23 +1041,16 @@ class CPCSAMTrainer(BaseTrainer):
             pin_memory=True,
         )
 
-        metric_list = 0.0
-
-        first_total = 0.0
-        second_total = 0.0
-        third_total = 0.0
-        first_list = np.zeros([len(test_dataset), 4])
-        second_list = np.zeros([len(test_dataset), 4])
-        third_list = np.zeros([len(test_dataset), 4])
-        count = 0
         multimask_output = True
         test_save_path = self.work_path / "test_save"
         test_save_path.mkdir(parents=True, exist_ok=True)
 
+        metric_list = []
+
         for data_batch in tqdm(test_dataloader):
             image = data_batch["image"]
             label = data_batch["label"]
-            case = data_batch["case_name"]
+            case = data_batch["case_name"][0]
 
             metric_i = test_single_volume_mean(
                 data_path=get_path(self.data_path),
@@ -1027,70 +1058,47 @@ class CPCSAMTrainer(BaseTrainer):
                 label=label,
                 net=self.model,
                 classes=self.num_classes + 1,
-                multimask_output=True,
+                multimask_output=multimask_output,
                 patch_size=[self.image_size, self.image_size],
                 input_size=[self.image_size, self.image_size],
                 test_save_path=test_save_path,
                 case=case,
                 z_spacing=ACDCDataset.Z_SPACING,
             )
-            first_metric = metric_i[0]
-            second_metric = metric_i[1]
-            third_metric = metric_i[2]
 
-            first_total += np.asarray(first_metric)
-            second_total += np.asarray(second_metric)
-            third_total += np.asarray(third_metric)
+            metric_list.append(metric_i)
 
-            # save
-            first_list[count, 0] = first_metric[0]
-            first_list[count, 1] = first_metric[1]
-            first_list[count, 2] = first_metric[2]
-            first_list[count, 3] = first_metric[3]
+        metric_tensor = torch.from_numpy(
+            np.array(metric_list)
+        )  # N, C, 4 (DSC, HD, ASD, JSD)
+        classes = test_dataset.CLASSES
+        metric_name = {0: "DSC", 1: "HD95", 2: "ASD", 3: "JSD"}
 
-            second_list[count, 0] = second_metric[0]
-            second_list[count, 1] = second_metric[1]
-            second_list[count, 2] = second_metric[2]
-            second_list[count, 3] = second_metric[3]
+        dataframe_dict = {}
+        for class_id in classes.keys():
+            if class_id == 0:
+                continue
 
-            third_list[count, 0] = third_metric[0]
-            third_list[count, 1] = third_metric[1]
-            third_list[count, 2] = third_metric[2]
-            third_list[count, 3] = third_metric[3]
+            for metric_id in metric_name.keys():
+                field_name = f"{classes[class_id]}-{metric_name[metric_id]}"
+                dataframe_dict[field_name] = metric_tensor[
+                    :, class_id - 1, metric_id
+                ].tolist()
 
-            count += 1
+        avg_metric = metric_tensor.mean(0)
+        self.logger.info("Real test results:")
+        for id in classes.keys():
+            if id == 0:
+                continue
 
-        avg_metric1 = np.nanmean(first_list, axis=0)
-        avg_metric2 = np.nanmean(second_list, axis=0)
-        avg_metric3 = np.nanmean(third_list, axis=0)
+            self.logger.info(f"  {classes[id]}: {avg_metric[id-1].tolist()}")
+
+        self.logger.info(f"Average: {avg_metric.mean(0).tolist()}")
 
         # save:
         write_csv = self.work_path / f"test_mean.csv"
-        save = pd.DataFrame(
-            {
-                "RV-dice": first_list[:, 0],
-                "RV-hd95": first_list[:, 1],
-                "RV-asd": first_list[:, 2],
-                "RV-jc": first_list[:, 3],
-                "Myo-dice": second_list[:, 0],
-                "Myo-hd95": second_list[:, 1],
-                "Myo-asd": second_list[:, 2],
-                "Myo-jc": second_list[:, 3],
-                "LV-dice": third_list[:, 0],
-                "LV-hd95": third_list[:, 1],
-                "LV-asd": third_list[:, 2],
-                "LV-jc": third_list[:, 3],
-            }
-        )
+        save = pd.DataFrame(dataframe_dict)
         save.to_csv(write_csv, index=False, sep=",")
-
-        self.logger.info("Real test results:")
-        self.logger.info(f"  RV: {avg_metric1}")
-        self.logger.info(f"  Myo: {avg_metric2}")
-        self.logger.info(f"  LV: {avg_metric3}")
-        self.logger.info(
-            f"  avg: {(avg_metric1 + avg_metric2 + avg_metric3) / 3}"
-        )
 
     def state_dict(self) -> dict:
         return {

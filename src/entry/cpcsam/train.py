@@ -9,6 +9,7 @@ def parse_args():
     parser.add_argument("--work-path", default=".", type=str)
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--seed", default=1337, type=int)
+    parser.add_argument("--test-only", action="store_true")
 
     # >>> Model parameters
     parser.add_argument("--num-classes", default=3, type=int)
@@ -70,6 +71,7 @@ def parse_args():
 def train_entry():
     args = parse_args()
     args_dict = vars(args)
+    test_only = args_dict.pop("test_only")
     optimizer = args_dict.pop("optimizer")
     lr_scheduler = args_dict.pop("lr_scheduler")
     loss = args_dict.pop("loss")
@@ -85,4 +87,7 @@ def train_entry():
     )
     trainer.initialize()
 
-    trainer.run_training()
+    if test_only:
+        trainer.perform_real_test()
+    else:
+        trainer.run_training()
