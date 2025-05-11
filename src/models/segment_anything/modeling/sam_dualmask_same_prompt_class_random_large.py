@@ -186,13 +186,18 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             for i in range(prompt_idx + 1):
                 prompt = next(prompt_iter)
 
-        with torch.no_grad():
+        if prompt_idx >= 0:
+            with torch.no_grad():
+                sparse_embeddings, dense_embeddings = self.prompt_encoder(
+                    points=None, boxes=None, masks=None
+                )
+
+                sparse_embeddings = sparse_embeddings.detach()
+                dense_embeddings = dense_embeddings.detach()
+        else:
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
                 points=None, boxes=None, masks=None
             )
-
-            sparse_embeddings = sparse_embeddings.detach()
-            dense_embeddings = dense_embeddings.detach()
 
         low_res_logits = [
             torch.zeros(1) for _ in range(len(self.mask_decoders))

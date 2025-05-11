@@ -63,6 +63,8 @@ def parse_args():
     parser.add_argument("--log-path", default=None, type=str)
     parser.add_argument("--config-path", default=None, type=str)
     parser.add_argument("--exp-name", default="", type=str)
+    parser.add_argument("--use-wandb", action="store_true")
+    parser.add_argument("--wandb-api-key", default=None, type=str)
     # <<< Log parameters
 
     return parser.parse_args()
@@ -78,6 +80,7 @@ def train_entry():
     save_metric = args_dict.pop("save_metric")
 
     trainer = CPCSAMTrainer(
+        config=args_dict,
         optimizer_name=optimizer,
         optimizer_kwargs={},
         lr_scheduler_name=lr_scheduler,

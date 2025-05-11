@@ -22,6 +22,7 @@ def calculate_metric_percase(pred, gt):
     else:
         return 0, np.inf
 
+
 def test_single_volume(
     image,
     label,
@@ -32,23 +33,34 @@ def test_single_volume(
     loss_fn=None,
 ):
     _, _, D, H, W = image.shape
-    image = image.to(net.device) # B, C, D, H, W
-    label = label.to(net.device) # B, D, H, W
-    image = image.squeeze(0).permute(1, 0, 2, 3) # D, C, H, W
-    label = label.squeeze(0) # D, H, W
+    image = image.to(net.device)  # B, C, D, H, W
+    label = label.to(net.device)  # B, D, H, W
+    image = image.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
+    label = label.squeeze(0)  # D, H, W
 
-    resized_image = F.resize(image, patch_size, interpolation=F.InterpolationMode.BILINEAR)
-    resized_label = F.resize(label, patch_size, interpolation=F.InterpolationMode.NEAREST)
+    resized_image = F.resize(
+        image, patch_size, interpolation=F.InterpolationMode.BILINEAR
+    )
+    resized_label = F.resize(
+        label, patch_size, interpolation=F.InterpolationMode.NEAREST
+    )
 
     net.eval()
+    ensemble_output_masks = torch.zeros(1, device=net.device)
     with torch.no_grad():
         outputs = net(resized_image, multimask_output, patch_size[0])
-        output_masks = outputs["masks"][0]
-        prediction = output_masks.softmax(1).argmax(1)
-        prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.NEAREST)
+        output_masks = outputs["masks"]
+        for m in output_masks:
+            ensemble_output_masks = ensemble_output_masks + m.softmax(1)
+        prediction = ensemble_output_masks.argmax(1)
+        prediction = F.resize(
+            prediction, [H, W], interpolation=F.InterpolationMode.NEAREST
+        )
 
     if loss_fn:
-        loss, _, _ = loss_fn(output_masks, resized_label)
+        loss, _, _ = torch.Tensor(
+            [loss_fn(m, resized_label) for m in output_masks]
+        ).mean(0)
     else:
         loss = None
 
@@ -62,6 +74,7 @@ def test_single_volume(
         )
 
     return metric_list, loss
+
 
 def _test_single_volume(
     image,
@@ -100,10 +113,16 @@ def _test_single_volume(
             output_masks = outputs["masks"]
 
             if loss_fn:
-                label_slice = zoom(label[ind], (patch_size[0] / x, patch_size[1] / y), order=0)
+                label_slice = zoom(
+                    label[ind], (patch_size[0] / x, patch_size[1] / y), order=0
+                )
                 loss_list.append(
                     loss_fn(
-                        output_masks, torch.from_numpy(label_slice).unsqueeze(0).long().to(net.device)
+                        output_masks,
+                        torch.from_numpy(label_slice)
+                        .unsqueeze(0)
+                        .long()
+                        .to(net.device),
                     )
                 )
 
@@ -173,6 +192,7 @@ def test_single_image(
         )
     return metric_list
 
+
 def test_single_volume_prompt(
     image,
     label,
@@ -185,23 +205,40 @@ def test_single_volume_prompt(
     loss_fn=None,
 ):
     _, _, D, H, W = image.shape
-    image = image.to(net.device) # B, C, D, H, W
-    label = label.to(net.device) # B, D, H, W
-    image = image.squeeze(0).permute(1, 0, 2, 3) # D, C, H, W
-    label = label.squeeze(0) # D, H, W
+    image = image.to(net.device)  # B, C, D, H, W
+    label = label.to(net.device)  # B, D, H, W
+    image = image.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
+    label = label.squeeze(0)  # D, H, W
 
-    resized_image = F.resize(image, patch_size, interpolation=F.InterpolationMode.BILINEAR)
-    resized_label = F.resize(label, patch_size, interpolation=F.InterpolationMode.NEAREST)
+    resized_image = F.resize(
+        image, patch_size, interpolation=F.InterpolationMode.BILINEAR
+    )
+    resized_label = F.resize(
+        label, patch_size, interpolation=F.InterpolationMode.NEAREST
+    )
 
     net.eval()
+    ensemble_output_masks = torch.zeros(1, device=net.device)
     with torch.no_grad():
-        outputs = net(resized_image, multimask_output, patch_size[0], promptidx, promptmode)
-        output_masks = outputs["masks"][0]
-        prediction = output_masks.softmax(1).argmax(1)
-        prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.NEAREST)
+        outputs = net(
+            resized_image,
+            multimask_output,
+            patch_size[0],
+            promptidx,
+            promptmode,
+        )
+        output_masks = outputs["masks"]
+        for m in output_masks:
+            ensemble_output_masks = ensemble_output_masks + m.softmax(1)
+        prediction = ensemble_output_masks.argmax(1)
+        prediction = F.resize(
+            prediction, [H, W], interpolation=F.InterpolationMode.NEAREST
+        )
 
     if loss_fn:
-        loss, _, _ = loss_fn(output_masks, resized_label)
+        loss, _, _ = torch.Tensor(
+            [loss_fn(m, resized_label) for m in output_masks]
+        ).mean(0)
     else:
         loss = None
 
@@ -215,6 +252,7 @@ def test_single_volume_prompt(
         )
 
     return metric_list, loss
+
 
 def _test_single_volume_prompt(
     image,
@@ -258,10 +296,16 @@ def _test_single_volume_prompt(
             output_masks = outputs["masks"]
 
             if loss_fn:
-                label_slice = zoom(label[ind], (patch_size[0] / x, patch_size[1] / y), order=0)
+                label_slice = zoom(
+                    label[ind], (patch_size[0] / x, patch_size[1] / y), order=0
+                )
                 loss_list.append(
                     loss_fn(
-                        output_masks, torch.from_numpy(label_slice).unsqueeze(0).long().to(net.device)
+                        output_masks,
+                        torch.from_numpy(label_slice)
+                        .unsqueeze(0)
+                        .long()
+                        .to(net.device),
                     )
                 )
 
@@ -373,6 +417,7 @@ def calculate_metric_percase_nan(pred, gt, raw_spacing):
         jc = np.zeros(1)
     return dice, hd95, asd, jc
 
+
 def test_single_volume_mean(
     data_path: Path,
     image,
@@ -388,13 +433,17 @@ def test_single_volume_mean(
 ):
     assert image.shape[0] == 1
     _, _, D, H, W = image.shape
-    image = image.to(net.device) # B, C, D, H, W
-    label = label.to(net.device) # B, D, H, W
-    image = image.squeeze(0).permute(1, 0, 2, 3) # D, C, H, W
-    label = label.squeeze(0) # D, H, W
+    image = image.to(net.device)  # B, C, D, H, W
+    label = label.to(net.device)  # B, D, H, W
+    image = image.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
+    label = label.squeeze(0)  # D, H, W
 
-    resized_image = F.resize(image, patch_size, interpolation=F.InterpolationMode.BILINEAR)
-    resized_label = F.resize(label, patch_size, interpolation=F.InterpolationMode.NEAREST)
+    resized_image = F.resize(
+        image, patch_size, interpolation=F.InterpolationMode.BILINEAR
+    )
+    resized_label = F.resize(
+        label, patch_size, interpolation=F.InterpolationMode.NEAREST
+    )
 
     net.eval()
     with torch.no_grad():
@@ -404,7 +453,9 @@ def test_single_volume_mean(
         for mask in output_masks:
             ensemble_output_masks = ensemble_output_masks + mask.softmax(1)
         prediction = ensemble_output_masks.argmax(1)
-        prediction = F.resize(prediction, [H, W], interpolation=F.InterpolationMode.NEAREST)
+        prediction = F.resize(
+            prediction, [H, W], interpolation=F.InterpolationMode.NEAREST
+        )
 
     image = image.cpu().numpy()
     prediction = prediction.cpu().numpy()
@@ -460,6 +511,7 @@ def test_single_volume_mean(
             visual_pil.save(visual_path / f"slice_{i}.png")
 
     return metric_list
+
 
 def _test_single_volume_mean(
     data_path: Path,

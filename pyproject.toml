@@ -17,6 +17,7 @@ requires-python = ">=3.10"
 dependencies = [
   "torch",
   "torchvision",
+  "wandb",
   "numpy<2",
   "monai", 
   "rich",

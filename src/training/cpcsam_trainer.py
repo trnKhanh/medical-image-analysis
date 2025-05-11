@@ -1,11 +1,14 @@
 import random
+import os
+from functools import partial
 from datetime import datetime
 import json
-from typing import Literal
+from typing import Literal, Any
 import logging
 import time
 from pathlib import Path
 
+import wandb
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -59,7 +62,7 @@ from transforms.common import (
 )
 
 
-class CPCSAMTrainer(BaseTrainer):
+class CPCSAMConfig(object):
     PROMPT_MODE = Literal[
         "point",
         "box",
@@ -72,8 +75,6 @@ class CPCSAMTrainer(BaseTrainer):
 
     def __init__(
         self,
-        work_path: Path | str = Path.cwd(),
-        device: torch.device | str = torch.device("cuda"),
         seed: int = 12345,
         # Model parameters
         in_channels: int = 3,
@@ -116,19 +117,13 @@ class CPCSAMTrainer(BaseTrainer):
         early_stop_max_patience: int | None = None,
         # Inference parameters
         stride: int | tuple[int, ...] | list[int] | None = None,
-        # Log parameters
-        verbose: bool = True,
-        log_path: Path | str | None = None,
-        config_path: Path | str | None = None,
-        log_mode: str = "a",
-        log_override: bool = False,
+        # Misc parameters
         exp_name: str = "",
+        **kwargs,
     ):
-        self.work_path = get_path(work_path)
-        self.device = torch.device("cpu")
-        self.to(device)
+        self._config_dict = {}
 
-        self._set_seed(seed)
+        self.seed = seed
 
         # >>> Model parameters
         self.in_channels = in_channels
@@ -173,13 +168,75 @@ class CPCSAMTrainer(BaseTrainer):
         self.consistency_weight_1 = consistency_weight_1
         self.consistency_weight_2 = consistency_weight_2
         self.early_stop_max_patience = early_stop_max_patience
-
-        self.current_epoch = 0
         # <<< Training parameters
 
         # >>> Inference parameters
         self.stride = stride
         # <<< Inference parameters
+
+        self.exp_name = exp_name
+
+    def __setattr__(self, name: str, value: Any, /) -> None:
+        if hasattr(self, "_config_dict"):
+            self._config_dict[name] = value
+
+        super(CPCSAMConfig, self).__setattr__(name, value)
+
+    def save(self, save_path: str | Path):
+        save_path = get_path(save_path)
+
+        with open(save_path, "w") as f:
+            json.dump(self._config_dict, f, indent=2)
+
+    def load(self, save_path: str | Path):
+        save_path = get_path(save_path)
+
+        with open(save_path, "r") as f:
+            data = json.load(f)
+
+        for k, v in data.items():
+            self.__setattr__(k, v)
+
+        return self
+
+
+def _worker_init_fn(worker_id):
+    seed = int(os.environ["CPCSAM_SEED"] or 0)
+    random.seed(seed + worker_id)
+
+
+class CPCSAMTrainer(BaseTrainer):
+    def __init__(
+        self,
+        work_path: Path | str = Path.cwd(),
+        device: torch.device | str = torch.device("cuda"),
+        config: CPCSAMConfig | dict | str | Path | None = None,
+        # Log parameters
+        verbose: bool = True,
+        log_path: Path | str | None = None,
+        config_path: Path | str | None = None,
+        log_mode: str = "a",
+        log_override: bool = False,
+        use_wandb: bool = False,
+        wandb_api_key: str | None = None,
+        **kwargs,
+    ):
+        if isinstance(config, CPCSAMConfig):
+            self.config = config
+        elif isinstance(config, dict):
+            self.config = CPCSAMConfig(**config)
+        elif isinstance(config, (str, Path)):
+            self.config = CPCSAMConfig().load(config)
+        else:
+            self.config = CPCSAMConfig()
+
+        self.work_path = get_path(work_path)
+        self.device = torch.device("cpu")
+        self.to(device)
+
+        self._set_seed(self.config.seed)
+
+        self.current_epoch = 0
 
         # >>> Log parameters
         self.verbose = verbose
@@ -187,16 +244,17 @@ class CPCSAMTrainer(BaseTrainer):
         self.config_path = config_path
         self.log_mode = log_mode
         self.log_override = log_override
+        self.use_wandb = use_wandb
+        self.wandb_api_key = wandb_api_key
         # <<< Log parameters
-
-        self.exp_name = exp_name
 
     def initialize(self):
         self._set_snapshot_work_dir()
+        self._setup_wandb()
         self._setup_logger()
         self._build_model()
-        if self.lora_ckpt:
-            self.load_model_checkpoint(self.lora_ckpt)
+        if self.config.lora_ckpt:
+            self.load_model_checkpoint(self.config.lora_ckpt)
         self.model.to(self.device)
 
     def _set_snapshot_work_dir(self):
@@ -204,31 +262,50 @@ class CPCSAMTrainer(BaseTrainer):
         snapshot_list = [
             f"ACDC",
             f"{current_time_str}",
-            f"patchsize-{self.patch_size}",
-            f"imagesize-{self.image_size}",
-            f"lora-{self.lora_rank}",
-            f"prompt-{self.promptmode}",
-            f"dropout-{self.dropout_rate}",
-            f"labeled-{self.labeled_num}",
-            f"batchsize-{self.batch_size}",
-            f"optimizer-{self.optimizer_name}",
-            f"lrscheduler-{self.lr_scheduler_name}",
-            f"lrwarmupiter-{self.lr_warmup_iter}"
-            f"warmupiter-{self.warmup_iter}",
-            f"startlr-{self.start_lr}",
-            f"dice-{self.dice_weight}",
-            f"coe1-{self.consistency_weight_1}",
-            f"coe2-{self.consistency_weight_2}",
-            f"dice-{self.dice_weight}",
-            f"epoch-{self.num_epochs}",
+            f"patchsize-{self.config.patch_size}",
+            f"imagesize-{self.config.image_size}",
+            f"lora-{self.config.lora_rank}",
+            f"prompt-{self.config.promptmode}",
+            f"dropout-{self.config.dropout_rate}",
+            f"labeled-{self.config.labeled_num}",
+            f"batchsize-{self.config.batch_size}",
+            f"optimizer-{self.config.optimizer_name}",
+            f"lrscheduler-{self.config.lr_scheduler_name}",
+            f"lrwarmupiter-{self.config.lr_warmup_iter}"
+            f"warmupiter-{self.config.warmup_iter}",
+            f"startlr-{self.config.start_lr}",
+            f"dice-{self.config.dice_weight}",
+            f"coe1-{self.config.consistency_weight_1}",
+            f"coe2-{self.config.consistency_weight_2}",
+            f"dice-{self.config.dice_weight}",
+            f"epoch-{self.config.num_epochs}",
         ]
-        if self.exp_name:
-            snapshot_list.append(self.exp_name)
+        if self.config.exp_name:
+            snapshot_list.append(self.config.exp_name)
         snapshot_str = "_".join(snapshot_list)
         self.work_path = self.work_path / snapshot_str
         self.work_path.mkdir(parents=True, exist_ok=True)
 
+    def _setup_wandb(self):
+        if self.use_wandb:
+            wandb.login(key=self.wandb_api_key)
+            self.wandb_runner = wandb.init(
+                dir=self.work_path / "wandb",
+                project="CPC-SAM",
+                name=self.work_path.stem,
+                config=self.config._config_dict,
+            )
+
+            wandb.define_metric("train_epoch")
+            wandb.define_metric("train/epoch/*", step_metric="train_epoch")
+            wandb.define_metric("train_iter")
+            wandb.define_metric("train/iter/*", step_metric="train_iter")
+            wandb.define_metric("valid_step")
+            wandb.define_metric("valid/*", step_metric="valid_step")
+
     def _set_seed(self, seed: int):
+        os.environ["CPCSAM_SEED"] = str(seed)
+
         self.seed = seed
         random.seed(seed)
         np.random.seed(seed)
@@ -281,6 +358,17 @@ class CPCSAMTrainer(BaseTrainer):
     def _remove_config_file(self):
         self.logger.removeHandler(self.config_file_handler)
 
+    def _save_config(self):
+        if not self.config_path:
+            config_json = self.work_path / "config.json"
+        else:
+            self.config_path = get_path(self.config_path)
+            config_json = (
+                self.config_path.parent / f"{self.config_path.stem}.json"
+            )
+
+        self.config.save(config_json)
+
     def _setup_log_shell(self):
         assert self.logger is not None
 
@@ -300,15 +388,17 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.addHandler(shell_handler)
 
     def _build_model(self):
-        self.sam, self.img_embedding_size = sam_model_registry[self.sam_name](
-            image_size=self.image_size,
-            num_classes=self.num_classes,
-            checkpoint=self.model_ckpt,
+        self.sam, self.img_embedding_size = sam_model_registry[
+            self.config.sam_name
+        ](
+            image_size=self.config.image_size,
+            num_classes=self.config.num_classes,
+            checkpoint=self.config.model_ckpt,
             pixel_mean=[0, 0, 0],
             pixel_std=[1, 1, 1],
-            dropout_rate=self.dropout_rate,
+            dropout_rate=self.config.dropout_rate,
         )
-        self.model = LoRA_Sam(self.sam, self.lora_rank)
+        self.model = LoRA_Sam(self.sam, self.config.lora_rank)
 
     def load_model_checkpoint(self, lora_ckpt: str | Path):
         if self.model is None:
@@ -351,38 +441,37 @@ class CPCSAMTrainer(BaseTrainer):
             self.logger.error("Dataset not found")
         return ref_dict[str(patiens_num)]
 
-    def _worker_init_fn(self, worker_id):
-        random.seed(self.seed + worker_id)
-
     def get_data(self):
         train_dataset = ACDCDataset(
-            data_path=self.data_path,
+            data_path=self.config.data_path,
             split="train",
             normalize=self._get_train_normalize(),
             transform=self._get_train_transform(),
             logger=self.logger,
         )
         total_slices = len(train_dataset)
-        labeled_slices = self.patients_to_slices("ACDC", self.labeled_num)
+        labeled_slices = self.patients_to_slices(
+            "ACDC", self.config.labeled_num
+        )
         labeled_indices = list(range(0, labeled_slices))
         unlabeled_indices = list(range(labeled_slices, total_slices))
         batch_sampler = TwoStreamBatchSampler(
             labeled_indices,
             unlabeled_indices,
-            self.batch_size,
-            self.batch_size - self.labeled_batch_size,
+            self.config.batch_size,
+            self.config.batch_size - self.config.labeled_batch_size,
         )
 
         train_dataloader = DataLoader(
             dataset=train_dataset,
             batch_sampler=batch_sampler,
-            num_workers=self.num_workers,
-            # worker_init_fn=self._worker_init_fn,
-            pin_memory=self.pin_memory,
+            num_workers=self.config.num_workers,
+            worker_init_fn=_worker_init_fn,
+            pin_memory=self.config.pin_memory,
         )
 
         valid_dataset = ACDCDataset(
-            data_path=self.data_path,
+            data_path=self.config.data_path,
             split="valid",
             normalize=self._get_valid_normalize(),
             transform=self._get_valid_transform(),
@@ -407,7 +496,7 @@ class CPCSAMTrainer(BaseTrainer):
 
     def _get_train_transform(self):
         transforms = []
-        if self.do_augment:
+        if self.config.do_augment:
             transforms.append(
                 RandomTransform(
                     ComposeTransform(
@@ -425,13 +514,13 @@ class CPCSAMTrainer(BaseTrainer):
                 RandomTransform(RandomAffine(degrees=(-20, 20)), p=0.5)
             )
 
-        if self.image_size:
-            transforms.append(JointResize(self.image_size))
+        if self.config.image_size:
+            transforms.append(JointResize(self.config.image_size))
 
         return ComposeTransform(transforms)
 
     def _get_train_normalize(self):
-        if self.do_normalize:
+        if self.config.do_normalize:
             return ZScoreNormalize()
         else:
             return None
@@ -440,7 +529,7 @@ class CPCSAMTrainer(BaseTrainer):
         return None
 
     def _get_valid_normalize(self):
-        if self.do_normalize:
+        if self.config.do_normalize:
             return ZScoreNormalize()
         else:
             return None
@@ -451,50 +540,52 @@ class CPCSAMTrainer(BaseTrainer):
     ):
         parameters = filter(lambda p: p.requires_grad, model.parameters())
 
-        if self.optimizer_name == "adam":
+        if self.config.optimizer_name == "adam":
             optimizer = torch.optim.Adam(
                 parameters,
                 betas=(0.9, 0.999),
                 weight_decay=0.1,
-                **self.optimizer_kwargs,
+                **self.config.optimizer_kwargs,
             )
-        elif self.optimizer_name == "adamw":
+        elif self.config.optimizer_name == "adamw":
             optimizer = torch.optim.AdamW(
                 parameters,
                 betas=(0.9, 0.999),
                 weight_decay=0.1,
-                **self.optimizer_kwargs,
+                **self.config.optimizer_kwargs,
             )
-        elif self.optimizer_name == "sgd":
+        elif self.config.optimizer_name == "sgd":
             optimizer = torch.optim.SGD(
                 parameters,
                 momentum=0.9,
                 weight_decay=0.001,
-                **self.optimizer_kwargs,
-            )
-        else:
-            raise ValueError(f'Optimizer "{self.optimizer_name}" not supported')
-
-        if self.lr_scheduler_name == "poly":
-            lr_scheduler = PolyLRScheduler(
-                optimizer,
-                self.start_lr,
-                self.max_iterations,
-                self.lr_warmup_iter,
+                **self.config.optimizer_kwargs,
             )
         else:
             raise ValueError(
-                f'Learning rate scheduler "{self.lr_scheduler_name}" not supported'
+                f'Optimizer "{self.config.optimizer_name}" not supported'
+            )
+
+        if self.config.lr_scheduler_name == "poly":
+            lr_scheduler = PolyLRScheduler(
+                optimizer,
+                self.config.start_lr,
+                self.max_iterations,
+                self.config.lr_warmup_iter,
+            )
+        else:
+            raise ValueError(
+                f'Learning rate scheduler "{self.config.lr_scheduler_name}" not supported'
             )
 
         return optimizer, lr_scheduler
 
     def _get_loss(self):
-        if self.loss_name == "dice+ce":
+        if self.config.loss_name == "dice+ce":
             supervised_loss = DiceAndCELoss(
                 dice_loss=DiceLoss,
                 dice_kwargs={
-                    "num_classes": self.num_classes,
+                    "num_classes": self.config.num_classes,
                     "smooth": 1e-5,
                     "do_bg": True,
                 },
@@ -505,7 +596,7 @@ class CPCSAMTrainer(BaseTrainer):
             unsupervised_loss = DualBranchDiceAndCELoss(
                 dice_loss=DiceLoss,
                 dice_kwargs={
-                    "num_classes": self.num_classes,
+                    "num_classes": self.config.num_classes,
                     "smooth": 1e-5,
                     "do_bg": True,
                 },
@@ -514,65 +605,74 @@ class CPCSAMTrainer(BaseTrainer):
                 default_dice_weight=0.8,
             )
         else:
-            raise ValueError(f"Loss function {self.loss_name} not found")
+            raise ValueError(f"Loss function {self.config.loss_name} not found")
 
         return supervised_loss, unsupervised_loss
 
     def _print_train_info(self):
         self._add_config_file()
+        self._save_config()
 
         self.logger.info(f"Training summary")
         self.logger.info("")
         self.logger.info(f"device: {self.device}")
         self.logger.info(f"seed: {self.seed}")
         self.logger.info(f'log_file: "{self.log_path}"')
+        if self.use_wandb:
+            self.logger.info(f"wandb_run_id: {self.wandb_runner.id}")
 
         self.logger.info(f"model: {self.model}")
-        self.logger.info(f"  num_classes: {self.num_classes}")
-        self.logger.info(f"  patch_size: {self.patch_size}")
-        self.logger.info(f"  image_size: {self.image_size}")
-        self.logger.info(f"  pretrained_model: {self.model_ckpt}")
-        self.logger.info(f"  sam_name: {self.sam_name}")
-        self.logger.info(f"  model_ckpt: {self.model_ckpt}")
-        self.logger.info(f"  lora_rank: {self.lora_rank}")
-        self.logger.info(f"  lora_ckpt: {self.lora_ckpt}")
-        self.logger.info(f"  promptmode: {self.promptmode}")
-        self.logger.info(f"  dropout_rate: {self.dropout_rate}")
+        self.logger.info(f"  num_classes: {self.config.num_classes}")
+        self.logger.info(f"  patch_size: {self.config.patch_size}")
+        self.logger.info(f"  image_size: {self.config.image_size}")
+        self.logger.info(f"  pretrained_model: {self.config.model_ckpt}")
+        self.logger.info(f"  sam_name: {self.config.sam_name}")
+        self.logger.info(f"  model_ckpt: {self.config.model_ckpt}")
+        self.logger.info(f"  lora_rank: {self.config.lora_rank}")
+        self.logger.info(f"  lora_ckpt: {self.config.lora_ckpt}")
+        self.logger.info(f"  promptmode: {self.config.promptmode}")
+        self.logger.info(f"  dropout_rate: {self.config.dropout_rate}")
 
-        self.logger.info(f'data: "{self.data_path}"')
+        self.logger.info(f'data: "{self.config.data_path}"')
         self.logger.info(f"  train_size (slices): {len(self.train_dataset)}")
         self.logger.info(
-            f"  labeled_patients (slices): {self.labeled_num} ({self.patients_to_slices('ACDC', self.labeled_num)})"
+            f"  labeled_patients (slices): {self.config.labeled_num} ({self.patients_to_slices('ACDC', self.config.labeled_num)})"
         )
         self.logger.info(f"  valid_size (volumns): {len(self.valid_dataset)}")
-        self.logger.info(f"  do_augment: {self.do_augment}")
-        if self.do_augment:
+        self.logger.info(f"  do_augment: {self.config.do_augment}")
+        if self.config.do_augment:
             self.logger.info(
                 f"{json.dumps(self._get_train_transform().get_params_dict(), indent=1)}"
             )
-        self.logger.info(f"  normalize: {self.do_normalize}")
-        self.logger.info(f"  batch_size: {self.batch_size}")
-        self.logger.info(f"  labeled_batch_size: {self.labeled_batch_size}")
-        self.logger.info(f"  num_workers: {self.num_workers}")
-        self.logger.info(f"  pin_memory: {self.pin_memory}")
-
-        self.logger.info(f"optimizer: {self.optimizer_name}")
-        self.logger.info(f"  lr_warmup_iter: {self.lr_warmup_iter}")
-        self.logger.info(f"  lr_scheduler: {self.lr_scheduler_name}")
-        self.logger.info(f"  start_lr: {self.start_lr}")
-        self.logger.info(f"  optimizer_kwargs: {self.optimizer_kwargs}")
-        self.logger.info(f"loss_fn: {self.loss_name}")
-        self.logger.info(f"save_metric: {self.save_metric_name}")
-        self.logger.info(f"start_epoch: {self.current_epoch}")
-        self.logger.info(f"num_epochs: {self.num_epochs}")
-        self.logger.info(f"warmup_iter: {self.warmup_iter}")
-        self.logger.info(f"save_freq_epoch: {self.save_freq_epoch}")
-        self.logger.info(f"valid_freq_iter: {self.valid_freq_iter}")
-        self.logger.info(f"dice_weight: {self.dice_weight}")
-        self.logger.info(f"consistency_weight_1: {self.consistency_weight_1}")
-        self.logger.info(f"consistency_weight_2: {self.consistency_weight_2}")
+        self.logger.info(f"  normalize: {self.config.do_normalize}")
+        self.logger.info(f"  batch_size: {self.config.batch_size}")
         self.logger.info(
-            f"early_stop_max_patience: {self.early_stop_max_patience}"
+            f"  labeled_batch_size: {self.config.labeled_batch_size}"
+        )
+        self.logger.info(f"  num_workers: {self.config.num_workers}")
+        self.logger.info(f"  pin_memory: {self.config.pin_memory}")
+
+        self.logger.info(f"optimizer: {self.config.optimizer_name}")
+        self.logger.info(f"  lr_warmup_iter: {self.config.lr_warmup_iter}")
+        self.logger.info(f"  lr_scheduler: {self.config.lr_scheduler_name}")
+        self.logger.info(f"  start_lr: {self.config.start_lr}")
+        self.logger.info(f"  optimizer_kwargs: {self.config.optimizer_kwargs}")
+        self.logger.info(f"loss_fn: {self.config.loss_name}")
+        self.logger.info(f"save_metric: {self.config.save_metric_name}")
+        self.logger.info(f"start_epoch: {self.current_epoch}")
+        self.logger.info(f"num_epochs: {self.config.num_epochs}")
+        self.logger.info(f"warmup_iter: {self.config.warmup_iter}")
+        self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
+        self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
+        self.logger.info(f"dice_weight: {self.config.dice_weight}")
+        self.logger.info(
+            f"consistency_weight_1: {self.config.consistency_weight_1}"
+        )
+        self.logger.info(
+            f"consistency_weight_2: {self.config.consistency_weight_2}"
+        )
+        self.logger.info(
+            f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
 
         self._remove_config_file()
@@ -580,8 +680,8 @@ class CPCSAMTrainer(BaseTrainer):
     def on_train_start(self):
         assert self.model is not None
 
-        if self.lora_ckpt:
-            self.load_model_checkpoint(self.lora_ckpt)
+        if self.config.lora_ckpt:
+            self.load_model_checkpoint(self.config.lora_ckpt)
 
         self.model.train()
         self.model.to(self.device)
@@ -592,7 +692,9 @@ class CPCSAMTrainer(BaseTrainer):
             self.train_dataloader,
             self.valid_dataloader,
         ) = self.get_data()
-        self.max_iterations = self.num_epochs * len(self.train_dataloader)
+        self.max_iterations = self.config.num_epochs * len(
+            self.train_dataloader
+        )
 
         self.current_epoch = 0
         self.current_iter = 0
@@ -603,19 +705,21 @@ class CPCSAMTrainer(BaseTrainer):
         )
         self.supervised_loss, self.unsupervised_loss = self._get_loss()
 
-        if self.maximum_save_metric is None:
-            if self.save_metric_name == "dice":
-                self.maximum_save_metric = True
-            elif self.save_metric_name == "hd":
-                self.maximum_save_metric = False
-            elif self.save_metric_name == "loss":
-                self.maximum_save_metric = False
+        if self.config.maximum_save_metric is None:
+            if self.config.save_metric_name == "dice":
+                self.config.maximum_save_metric = True
+            elif self.config.save_metric_name == "hd":
+                self.config.maximum_save_metric = False
+            elif self.config.save_metric_name == "loss":
+                self.config.maximum_save_metric = False
             else:
                 raise ValueError(
-                    f"{self.save_metric_name} is not a valid save metric"
+                    f"{self.config.save_metric_name} is not a valid save metric"
                 )
 
-        default_metric = -torch.inf if self.maximum_save_metric else torch.inf
+        default_metric = (
+            -torch.inf if self.config.maximum_save_metric else torch.inf
+        )
         self._best_valid_metric = default_metric
         self._cur_valid_metric = default_metric
 
@@ -669,7 +773,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.model.train()
 
     def on_train_epoch_end(self):
-        if (self.current_epoch + 1) % self.save_freq_epoch == 0:
+        if (self.current_epoch + 1) % self.config.save_freq_epoch == 0:
             self.save_state_dict(self.work_path / f"epoch_{self.current_epoch}")
 
         train_losses = (
@@ -677,11 +781,21 @@ class CPCSAMTrainer(BaseTrainer):
             .mean(0)
             .tolist()
         )
-        self.logger.info(f"Loss ({self.loss_name}): {train_losses}")
+        self.logger.info(f"Loss ({self.config.loss_name}): {train_losses}")
 
         self._train_end_time = time.time()
         time_elapsed = self._train_end_time - self._train_start_time
         self.logger.info(f"Train time elapsed: {time_elapsed:.3f} seconds")
+
+        if self.use_wandb:
+            train_metric = {
+                "train/epoch/losses/loss": train_losses[0],
+                "train/epoch/losses/loss1": train_losses[1],
+                "train/epoch/losses/loss2": train_losses[2],
+                "train_epoch": self.current_epoch,
+                "train_iter": self.current_iter,
+            }
+            self.wandb_runner.log(train_metric)
 
     def on_valid_epoch_start(self):
         self._valid_start_time = time.time()
@@ -728,56 +842,71 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"         loss: {loss.item()}")
         self.logger.info(f"(prompt) loss: {prompt_loss.item()}")
 
-        if self.save_metric_name == "dice":
+        if self.config.save_metric_name == "dice":
             self._cur_valid_metric = metric[:, 0].mean()
             self._cur_valid_prompt_metric = prompt_metric[:, 0].mean()
-        elif self.save_metric_name == "hd":
+        elif self.config.save_metric_name == "hd":
             self._cur_valid_metric = metric[:, 1].mean()
             self._cur_valid_prompt_metric = prompt_metric[:, 1].mean()
-        elif self.save_metric_name == "loss":
+        elif self.config.save_metric_name == "loss":
             self._cur_valid_metric = loss
             self._cur_valid_prompt_metric = prompt_loss
         else:
             raise ValueError(
-                f"{self.save_metric_name} is not a valid save metric"
+                f"{self.config.save_metric_name} is not a valid save metric"
             )
 
         is_improved = False
 
         if self._is_improved(
-            self._best_valid_metric, self._cur_valid_metric, self.maximum_save_metric
+            self._best_valid_metric,
+            self._cur_valid_metric,
+            self.config.maximum_save_metric,
         ):
             self._best_valid_metric = self._cur_valid_metric
             self.logger.info(
-                f"New best metric ({self.save_metric_name}): {self._cur_valid_metric}"
+                f"New best metric ({self.config.save_metric_name}): {self._cur_valid_metric}"
             )
             self.save_state_dict(self.work_path / "best_model")
             self.save_state_dict(
                 self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}"
+                / f"iter_{self.current_iter}_{self._best_valid_metric:.4f}"
             )
             is_improved = True
 
         if self._is_improved(
             self._best_valid_prompt_metric,
             self._cur_valid_prompt_metric,
-            self.maximum_save_metric,
+            self.config.maximum_save_metric,
         ):
             self._best_valid_prompt_metric = self._cur_valid_prompt_metric
             self.logger.info(
-                f"New best prompt metric ({self.save_metric_name}): {self._cur_valid_prompt_metric}"
+                f"New best prompt metric ({self.config.save_metric_name}): {self._cur_valid_prompt_metric}"
             )
             self.save_state_dict(self.work_path / "best_model_prompt")
             self.save_state_dict(
                 self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_metric:.3f}_prompt"
+                / f"iter_{self.current_iter}_{self._best_valid_metric:.4f}_prompt"
             )
             is_improved = True
 
         if is_improved:
             self.current_patience = 0
+            self.wandb_runner.alert(
+                title="Improved performance",
+                text=f"New best performance: {self._best_valid_metric:.4f} {self._best_valid_prompt_metric:.4f} (prompt)",
+                level="INFO",
+            )
         else:
             self.current_patience += 1
+            if self.config.early_stop_max_patience:
+                alert_threshold = self.config.early_stop_max_patience * 0.75
+                if self.current_patience >= alert_threshold:
+                    self.wandb_runner.alert(
+                        title="Performance Stagnation",
+                        text=f"Performance is not improved for {self.current_patience} step",
+                        level="WARN",
+                    )
 
         self._valid_end_time = time.time()
         time_elapsed = self._valid_start_time - self._valid_start_time
@@ -819,21 +948,23 @@ class CPCSAMTrainer(BaseTrainer):
         outputs = self.model(
             image_batch,
             multimask_output,
-            self.image_size,
+            self.config.image_size,
             image_embeddings=image_embeddings,
         )
         num_decoders = len(self.model.sam.mask_decoders)
 
-        labeled_label_batch = label_batch[: self.labeled_batch_size]
+        labeled_label_batch = label_batch[: self.config.labeled_batch_size]
 
         loss1 = torch.zeros(1, device=self.device)
         for i in range(num_decoders):
             low_res_logits = outputs["low_res_logits"][i]
-            labeled_low_res_logits = low_res_logits[: self.labeled_batch_size]
+            labeled_low_res_logits = low_res_logits[
+                : self.config.labeled_batch_size
+            ]
             supervised_loss, _, _ = self.supervised_loss(
                 labeled_low_res_logits,
                 labeled_label_batch,
-                self.dice_weight,
+                self.config.dice_weight,
             )
             loss1 += supervised_loss
 
@@ -846,14 +977,14 @@ class CPCSAMTrainer(BaseTrainer):
 
         loss2 = torch.zeros(1, device=self.device)
 
-        if self.current_iter >= self.warmup_iter:
+        if self.current_iter >= self.config.warmup_iter:
             for prompt_idx in range(num_decoders):
                 outputs_round2 = self.model(
                     image_batch,
                     multimask_output,
-                    self.image_size,
+                    self.config.image_size,
                     prompt_idx,
-                    self.promptmode,
+                    self.config.promptmode,
                     image_embeddings,
                 )
                 low_res_logits_prompt = outputs_round2["low_res_logits"][
@@ -865,21 +996,21 @@ class CPCSAMTrainer(BaseTrainer):
 
                 # Compute the supervised loss of the prompt output
                 labeled_low_res_logits_prompt = low_res_logits_prompt[
-                    : self.labeled_batch_size
+                    : self.config.labeled_batch_size
                 ]
                 labeled_low_res_logits_prompt_r = low_res_logits_prompt_r[
-                    : self.labeled_batch_size
+                    : self.config.labeled_batch_size
                 ]
 
                 supervised_loss, _, _ = self.supervised_loss(
                     labeled_low_res_logits_prompt,
                     labeled_label_batch,
-                    self.dice_weight,
+                    self.config.dice_weight,
                 )
                 supervised_loss_r, _, _ = self.supervised_loss(
                     labeled_low_res_logits_prompt_r,
                     labeled_label_batch,
-                    self.dice_weight,
+                    self.config.dice_weight,
                 )
 
                 supervised_loss_round2 += supervised_loss
@@ -892,7 +1023,9 @@ class CPCSAMTrainer(BaseTrainer):
                     + low_res_logits_prompt_r.softmax(1)
                 ) / 2.0
                 pseudo_label_prompt = (
-                    ensemble_low_res_logits_prompt[self.labeled_batch_size :]
+                    ensemble_low_res_logits_prompt[
+                        self.config.labeled_batch_size :
+                    ]
                     .detach()
                     .argmax(1)
                     .long()
@@ -902,7 +1035,7 @@ class CPCSAMTrainer(BaseTrainer):
                     if id != prompt_idx:
                         consistency_loss, _, _ = self.supervised_loss(
                             outputs_round2["low_res_logits"][id][
-                                self.labeled_batch_size :
+                                self.config.labeled_batch_size :
                             ],
                             pseudo_label_prompt,
                             0.5,
@@ -910,7 +1043,7 @@ class CPCSAMTrainer(BaseTrainer):
                         consistency_loss_round2 += consistency_loss
 
                 consistency_loss_r, _, _ = self.supervised_loss(
-                    low_res_logits_prompt_r[self.labeled_batch_size :],
+                    low_res_logits_prompt_r[self.config.labeled_batch_size :],
                     pseudo_label_prompt,
                     0.5,
                 )
@@ -919,37 +1052,50 @@ class CPCSAMTrainer(BaseTrainer):
             loss2 = (
                 supervised_loss_round2
                 + supervised_loss_round2_r
-                + self.consistency_weight_1 * consistency_loss_round2
-                + self.consistency_weight_2 * consistency_loss_round2_r
+                + self.config.consistency_weight_1 * consistency_loss_round2
+                + self.config.consistency_weight_2 * consistency_loss_round2_r
             )
 
         loss = loss1 + loss2
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        losses = torch.Tensor([loss, loss1, loss2])
+        losses = torch.Tensor([loss.detach(), loss1.detach(), loss2.detach()])
         self.logger.info(f"Loss: {losses.tolist()}")
         self.epoch_train_outputs.append({"loss": losses})
-        self.current_iter += 1
         self.logger.info(f"")
+
+        if self.use_wandb:
+            lr = self.lr_scheduler.get_last_lr()[0]
+            train_metric = {
+                "train/iter/lr": lr,
+                "train/iter/losses/loss": losses[0],
+                "train/iter/losses/loss1": losses[1],
+                "train/iter/losses/loss2": losses[2],
+                "train_epoch": self.current_epoch,
+                "train_iter": self.current_iter,
+            }
+            self.wandb_runner.log(train_metric)
+
+        self.current_iter += 1
 
     def valid_step(self, sampled_batch):
         metric, loss = test_single_volume(
             image=sampled_batch["image"],
             label=sampled_batch["label"],
             net=self.model,
-            classes=self.num_classes + 1,
-            patch_size=[self.image_size, self.image_size],
+            classes=self.config.num_classes + 1,
+            patch_size=[self.config.image_size, self.config.image_size],
             loss_fn=self.supervised_loss,
         )
         prompt_metric, prompt_loss = test_single_volume_prompt(
             image=sampled_batch["image"],
             label=sampled_batch["label"],
             net=self.model,
-            classes=self.num_classes + 1,
+            classes=self.config.num_classes + 1,
             promptidx=1,
-            promptmode=self.promptmode,
-            patch_size=[self.image_size, self.image_size],
+            promptmode=self.config.promptmode,
+            patch_size=[self.config.image_size, self.config.image_size],
             loss_fn=self.supervised_loss,
         )
 
@@ -962,27 +1108,52 @@ class CPCSAMTrainer(BaseTrainer):
             }
         )
 
-        metric = (
-            torch.stack([o["metric"][:, :] for o in self.epoch_valid_outputs])
-            .mean(0)
-            .tolist()
-        )
-        prompt_metric = (
-            torch.stack(
-                [o["prompt_metric"][:, 0] for o in self.epoch_valid_outputs]
-            )
-            .mean(0)
-            .tolist()
-        )
+        metric = torch.stack(
+            [o["metric"] for o in self.epoch_valid_outputs]
+        ).mean(0)
+        prompt_metric = torch.stack(
+            [o["prompt_metric"] for o in self.epoch_valid_outputs]
+        ).mean(0)
+
+        if self.use_wandb:
+            valid_metric = {
+                "valid/metric/dsc": metric[:, 0].mean().item(),
+                "valid/metric/dsc_prompt": prompt_metric[:, 0].mean().item(),
+                "valid/metric/hd95": metric[:, 1].mean().item(),
+                "valid/metric/hd95_prompt": prompt_metric[:, 1].mean().item(),
+                "valid/metric/loss": loss,
+                "valid/metric/loss_prompt": prompt_loss,
+                "train_epoch": self.current_epoch,
+                "train_iter": self.current_iter,
+                "valid_step": self.current_iter,
+            }
+            for i in range(self.config.num_classes):
+                valid_metric[f"valid/metric_per_cls/dsc/class_{i}"] = metric[
+                    i, 0
+                ].item()
+                valid_metric[f"valid/metric_per_cls/dsc_prompt/class_{i}"] = (
+                    prompt_metric[i, 0].item()
+                )
+                valid_metric[f"valid/metric_per_cls/hd95/class_{i}"] = metric[
+                    i, 1
+                ].item()
+                valid_metric[f"valid/metric_per_cls/hd95_prompt/class_{i}"] = (
+                    prompt_metric[i, 1].item()
+                )
+
+            self.wandb_runner.log(valid_metric)
 
         self.valid_tqdm.set_postfix(
-            dict(metric=metric, prompt_metric=prompt_metric)
+            dict(
+                metric=metric.mean(0).tolist(),
+                prompt_metric=prompt_metric.mean(0).tolist(),
+            )
         )
 
     def train(self):
         self.on_train_start()
 
-        for epoch in range(self.current_epoch, self.num_epochs):
+        for epoch in range(self.current_epoch, self.config.num_epochs):
             if self.is_finished():
                 break
             self.on_epoch_start()
@@ -998,7 +1169,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.on_train_end()
 
     def valid(self):
-        if (self.current_iter) % self.valid_freq_iter == 0:
+        if (self.current_iter) % self.config.valid_freq_iter == 0:
             with torch.no_grad():
                 self.on_valid_epoch_start()
                 for sampled_batch in self.valid_tqdm:
@@ -1006,18 +1177,20 @@ class CPCSAMTrainer(BaseTrainer):
                 self.on_valid_epoch_end()
 
     def is_finished(self):
-        if self.current_iter < self.min_iter:
+        if self.current_iter < self.config.min_iter:
             return False
 
-        if self.early_stop_max_patience:
-            is_finished = self.current_patience >= self.early_stop_max_patience
+        if self.config.early_stop_max_patience:
+            is_finished = (
+                self.current_patience >= self.config.early_stop_max_patience
+            )
             if is_finished:
                 self.logger.info(
                     "Exceeded maximum patience. Training will be early stopped"
                 )
             return is_finished
 
-        return self.current_epoch >= self.num_epochs
+        return self.current_epoch >= self.config.num_epochs
 
     def run_training(self):
         self.train()
@@ -1025,7 +1198,7 @@ class CPCSAMTrainer(BaseTrainer):
 
     def perform_real_test(self):
         test_dataset = ACDCDataset(
-            data_path=self.data_path,
+            data_path=self.config.data_path,
             split="test",
             normalize=self._get_valid_normalize(),
             transform=self._get_valid_transform(),
@@ -1053,14 +1226,14 @@ class CPCSAMTrainer(BaseTrainer):
             case = data_batch["case_name"][0]
 
             metric_i = test_single_volume_mean(
-                data_path=get_path(self.data_path),
+                data_path=get_path(self.config.data_path),
                 image=image,
                 label=label,
                 net=self.model,
-                classes=self.num_classes + 1,
+                classes=self.config.num_classes + 1,
                 multimask_output=multimask_output,
-                patch_size=[self.image_size, self.image_size],
-                input_size=[self.image_size, self.image_size],
+                patch_size=[self.config.image_size, self.config.image_size],
+                input_size=[self.config.image_size, self.config.image_size],
                 test_save_path=test_save_path,
                 case=case,
                 z_spacing=ACDCDataset.Z_SPACING,
@@ -1084,6 +1257,13 @@ class CPCSAMTrainer(BaseTrainer):
                 dataframe_dict[field_name] = metric_tensor[
                     :, class_id - 1, metric_id
                 ].tolist()
+
+        if self.use_wandb:
+            wandb_table = wandb.Table(
+                columns=dataframe_dict.keys(),
+                data=list(zip(*list(dataframe_dict.values()))),
+            )
+            self.wandb_runner.log({"test_performance": wandb_table})
 
         avg_metric = metric_tensor.mean(0)
         self.logger.info("Real test results:")
@@ -1126,6 +1306,9 @@ class CPCSAMTrainer(BaseTrainer):
         state_dict = self.state_dict()
         state_dict.pop("model")
         torch.save(state_dict, save_path / "training_state.pth")
+
+        if self.use_wandb:
+            wandb.log_model(save_path, name=save_path.name)
 
         self.logger.info(f'Saved new checkpoint to "{save_path}"')
 
