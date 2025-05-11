@@ -88,6 +88,7 @@ class CPCSAMConfig(object):
         promptmode: list[PROMPT_MODE] = ["point"],
         dropout_rate: float = 0.0,
         # Data parameters
+        dataset: Literal["ACDC"] = "ACDC",
         data_path: Path | str = "data",
         labeled_ratio: float = 1.0,
         labeled_num: int | None = 1,
@@ -139,6 +140,7 @@ class CPCSAMConfig(object):
         # <<< Model parameters
 
         # >>> Data parameters
+        self.dataset = dataset
         self.data_path = data_path
         self.labeled_ratio = labeled_ratio
         self.labeled_num = labeled_num
@@ -640,7 +642,8 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  promptmode: {self.config.promptmode}")
         self.logger.info(f"  dropout_rate: {self.config.dropout_rate}")
 
-        self.logger.info(f'data: "{self.config.data_path}"')
+        self.logger.info(f"data: {self.config.dataset}")
+        self.logger.info(f"  data_path: {self.config.data_path}")
         self.logger.info(f"  train_size (slices): {len(self.train_dataset)}")
         self.logger.info(
             f"  labeled_patients (slices): {self.config.labeled_num} ({self.patients_to_slices('ACDC', self.config.labeled_num)})"

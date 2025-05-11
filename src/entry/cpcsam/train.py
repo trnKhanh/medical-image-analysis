@@ -26,6 +26,7 @@ def parse_args():
     # <<< Model parameters
 
     # >>> Data parameters
+    parser.add_argument("--dataset", default="ACDC", type=str)
     parser.add_argument("--data-path", required=True, type=str)
     parser.add_argument("--labeled-num", default=1, type=int)
     parser.add_argument("--do-augment", action="store_true")
