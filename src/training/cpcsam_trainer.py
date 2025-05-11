@@ -368,6 +368,13 @@ class CPCSAMTrainer(BaseTrainer):
             )
 
         self.config.save(config_json)
+        if self.use_wandb:
+            wandb.log_artifact(
+                config_json,
+                name=f"config_{self.wandb_runner.id}",
+                type="config",
+                aliases=["json"],
+            )
 
     def _setup_log_shell(self):
         assert self.logger is not None
@@ -677,6 +684,14 @@ class CPCSAMTrainer(BaseTrainer):
 
         self._remove_config_file()
 
+        if self.use_wandb and self.config_path:
+            wandb.log_artifact(
+                self.config_path,
+                name=f"config_{self.wandb_runner.id}",
+                type="config",
+                aliases=["txt"],
+            )
+
     def on_train_start(self):
         assert self.model is not None
 
@@ -743,7 +758,15 @@ class CPCSAMTrainer(BaseTrainer):
             mask_overlay_pil.save(str(sanity_path / f"{i + 1}.png"))
 
     def on_train_end(self):
-        self.save_state_dict(self.work_path / f"ckpt/final_model")
+        ckpt_path = self.work_path / f"ckpt/final_model"
+        self.save_state_dict(ckpt_path, True)
+        if self.use_wandb:
+            wandb.log_model(
+                ckpt_path,
+                name=f"model_{self.wandb_runner.id}",
+                aliases=[f"epoch_{self.current_epoch}", "final"],
+            )
+
         self.logger.info("")
         self.logger.info("")
 
@@ -774,7 +797,15 @@ class CPCSAMTrainer(BaseTrainer):
 
     def on_train_epoch_end(self):
         if (self.current_epoch + 1) % self.config.save_freq_epoch == 0:
-            self.save_state_dict(self.work_path / f"epoch_{self.current_epoch}")
+            ckpt_path = self.work_path / f"epoch_{self.current_epoch}"
+            self.save_state_dict(ckpt_path, True)
+
+            if self.use_wandb:
+                wandb.log_model(
+                    ckpt_path,
+                    name=f"model_{self.wandb_runner.id}",
+                    aliases=[f"epoch_{self.current_epoch}"],
+                )
 
         train_losses = (
             torch.stack([o["loss"] for o in self.epoch_train_outputs])
@@ -868,10 +899,22 @@ class CPCSAMTrainer(BaseTrainer):
                 f"New best metric ({self.config.save_metric_name}): {self._cur_valid_metric}"
             )
             self.save_state_dict(self.work_path / "best_model")
-            self.save_state_dict(
+
+            ckpt_path = (
                 self.work_path
                 / f"iter_{self.current_iter}_{self._best_valid_metric:.4f}"
             )
+            self.save_state_dict(ckpt_path)
+
+            if self.use_wandb:
+                wandb.log_model(
+                    ckpt_path,
+                    name=f"best_model_{self.wandb_runner.id}",
+                    aliases=[
+                        f"iter_{self.current_iter}",
+                        f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
+                    ],
+                )
             is_improved = True
 
         if self._is_improved(
@@ -884,10 +927,22 @@ class CPCSAMTrainer(BaseTrainer):
                 f"New best prompt metric ({self.config.save_metric_name}): {self._cur_valid_prompt_metric}"
             )
             self.save_state_dict(self.work_path / "best_model_prompt")
-            self.save_state_dict(
+
+            ckpt_path = (
                 self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_metric:.4f}_prompt"
+                / f"iter_{self.current_iter}_{self._best_valid_prompt_metric:.4f}_prompt"
             )
+            self.save_state_dict(ckpt_path)
+
+            if self.use_wandb:
+                wandb.log_model(
+                    ckpt_path,
+                    name=f"best_model_prompt_{self.wandb_runner.id}",
+                    aliases=[
+                        f"iter_{self.current_iter}",
+                        f"{self.config.save_metric_name}_{self._best_valid_prompt_metric:.4f}",
+                    ],
+                )
             is_improved = True
 
         if is_improved:
@@ -1297,18 +1352,18 @@ class CPCSAMTrainer(BaseTrainer):
         self.current_epoch = training_state["current_epoch"]
         self.current_iter = training_state["current_iter"]
 
-    def save_state_dict(self, save_path: str | Path):
+    def save_state_dict(
+        self, save_path: str | Path, save_training_state: bool = False
+    ):
         save_path = get_path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
 
         self.save_model_checkpoint(save_path / "model.pth")
 
-        state_dict = self.state_dict()
-        state_dict.pop("model")
-        torch.save(state_dict, save_path / "training_state.pth")
-
-        if self.use_wandb:
-            wandb.log_model(save_path, name=save_path.name)
+        if save_training_state:
+            state_dict = self.state_dict()
+            state_dict.pop("model")
+            torch.save(state_dict, save_path / "training_state.pth")
 
         self.logger.info(f'Saved new checkpoint to "{save_path}"')
 
