@@ -92,6 +92,8 @@ def build_sam_vit_b_dualmask_same_prompt_class_random_large(
     pixel_std=[58.395, 57.12, 57.375],
     checkpoint=None,
     dropout_rate=0.0,
+    num_points_prompt=(1, 2),
+    bbox_change_rate=(0.1, 0.2),
 ):
     return _build_sam_dualmask_same_prompt_class_random_large(
         encoder_embed_dim=768,
@@ -105,6 +107,8 @@ def build_sam_vit_b_dualmask_same_prompt_class_random_large(
         pixel_mean=pixel_mean,
         pixel_std=pixel_std,
         dropout_rate=dropout_rate,
+        num_points_prompt=num_points_prompt,
+        bbox_change_rate=bbox_change_rate,
     )
 
 
@@ -128,6 +132,8 @@ def _build_sam_dualmask_same_prompt_class_random_large(
     pixel_std,
     checkpoint=None,
     dropout_rate=0.0,
+    num_points_prompt=(1, 2),
+    bbox_change_rate=(0.1, 0.2),
 ):
     prompt_embed_dim = 256
     image_size = image_size
@@ -200,6 +206,8 @@ def _build_sam_dualmask_same_prompt_class_random_large(
         pixel_mean=pixel_mean,
         pixel_std=pixel_std,
         dropout_rate=dropout_rate,
+        num_points_prompt=num_points_prompt,
+        bbox_change_rate=bbox_change_rate,
     )
     # sam.eval()
     sam.train()

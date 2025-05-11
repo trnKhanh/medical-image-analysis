@@ -23,6 +23,8 @@ def parse_args():
     parser.add_argument("--lora-ckpt", default=None, type=str)
     parser.add_argument("--promptmode", default=["point"], nargs="+", type=str)
     parser.add_argument("--dropout-rate", default=0.0, type=float)
+    parser.add_argument("--num-points-prompt", default=[1, 2], type=int, nargs="+")
+    parser.add_argument("--bbox-change-rate", default=[0.1, 0.2], type=float, nargs="+")
     # <<< Model parameters
 
     # >>> Data parameters

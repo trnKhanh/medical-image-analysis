@@ -42,6 +42,8 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         prompt_encoder: PromptEncoder_prompt_class,
         mask_decoders: list[MaskDecoder_prompt_large],
         dropout_rate: float = 0.0,
+        num_points_prompt: tuple[int, int] = (1, 2),
+        bbox_change_rate: tuple[float, float] = (0.1, 0.2),
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
         pixel_std: List[float] = [58.395, 57.12, 57.375],
     ) -> None:
@@ -68,6 +70,9 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             "pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False
         )
         self.dropout_rate = dropout_rate
+        self.feature_dropout = nn.Dropout2d(dropout_rate)
+        self.num_points_prompt = num_points_prompt
+        self.bbox_change_rate = bbox_change_rate
 
     @property
     def device(self) -> Any:
@@ -241,11 +246,9 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             )
 
             if self.dropout_rate > 0:
-                dropout_image_embeddings = F.dropout(
-                    image_embeddings, self.dropout_rate, self.training
-                )
+                dropout_image_embeddings = self.feature_dropout(image_embeddings)
             else:
-                dropout_image_embeddings = image_embeddings 
+                dropout_image_embeddings = image_embeddings
 
             (
                 low_res_logits[prompt_idx],
@@ -454,7 +457,9 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         # points_prompt = np.zeros([b, num_class, 2])
         # points_label = np.zeros([b, num_class])
         # points_prompt_random = np.zeros([b, num_class, 2])
-        num_points = np.random.randint(1, 3, num_class)
+        num_points = np.random.randint(
+            self.num_points_prompt[0], self.num_points_prompt[1] + 1, num_class
+        )
         cum_num_points = np.concatenate(
             [np.zeros(1, dtype=np.int64), np.cumsum(num_points)]
         )
@@ -475,11 +480,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 # obtain the binary mask
                 mask_cls = (coarse_mask_np[idx] == cls).astype(np.uint8)
                 if mask_cls.max() > 0:
-                    region_mask, num_regions = label(
-                        mask_cls, connectivity=2, return_num=True
-                    )
-                    ratio_list, region_id_list = [], []
-                    region_size_list = []
+                    region_mask = np.array(label(mask_cls, connectivity=2))
                     region_ids, region_sizes = np.unique(
                         region_mask, return_counts=True
                     )
@@ -529,10 +530,10 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                         points_label[idx, cls_slice] = cls
 
                         fit_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, 0.1
+                            binary_msk, self.bbox_change_rate[0]
                         )
                         loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, 0.3
+                            binary_msk, self.bbox_change_rate[1]
                         )
                 else:
                     (

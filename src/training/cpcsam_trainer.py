@@ -87,6 +87,11 @@ class CPCSAMConfig(object):
         lora_ckpt: Path | str | None = None,
         promptmode: list[PROMPT_MODE] = ["point"],
         dropout_rate: float = 0.0,
+        num_points_prompt: int | list[int] | tuple[int, int] = (1, 2),
+        bbox_change_rate: float | list[float] | tuple[float, float] = (
+            0.1,
+            0.2,
+        ),
         # Data parameters
         dataset: Literal["ACDC"] = "ACDC",
         data_path: Path | str = "data",
@@ -137,6 +142,8 @@ class CPCSAMConfig(object):
         self.lora_ckpt = lora_ckpt
         self.promptmode = promptmode
         self.dropout_rate = dropout_rate
+        self.num_points_prompt = num_points_prompt
+        self.bbox_change_rate = bbox_change_rate
         # <<< Model parameters
 
         # >>> Data parameters
@@ -264,22 +271,23 @@ class CPCSAMTrainer(BaseTrainer):
         snapshot_list = [
             f"ACDC",
             f"{current_time_str}",
-            f"patchsize-{self.config.patch_size}",
-            f"imagesize-{self.config.image_size}",
+            f"patchsz-{self.config.patch_size}",
+            f"imgsz-{self.config.image_size}",
             f"lora-{self.config.lora_rank}",
             f"prompt-{self.config.promptmode}",
             f"dropout-{self.config.dropout_rate}",
+            f"point-{self.config.num_points_prompt}",
+            f"bbox-{self.config.bbox_change_rate}",
             f"labeled-{self.config.labeled_num}",
-            f"batchsize-{self.config.batch_size}",
+            f"batchsz-{self.config.batch_size}",
             f"optimizer-{self.config.optimizer_name}",
-            f"lrscheduler-{self.config.lr_scheduler_name}",
-            f"lrwarmupiter-{self.config.lr_warmup_iter}"
-            f"warmupiter-{self.config.warmup_iter}",
+            f"lr-{self.config.lr_scheduler_name}",
+            f"lrwarm-{self.config.lr_warmup_iter}"
+            f"warmiter-{self.config.warmup_iter}",
             f"startlr-{self.config.start_lr}",
             f"dice-{self.config.dice_weight}",
             f"coe1-{self.config.consistency_weight_1}",
             f"coe2-{self.config.consistency_weight_2}",
-            f"dice-{self.config.dice_weight}",
             f"epoch-{self.config.num_epochs}",
         ]
         if self.config.exp_name:
@@ -406,6 +414,8 @@ class CPCSAMTrainer(BaseTrainer):
             pixel_mean=[0, 0, 0],
             pixel_std=[1, 1, 1],
             dropout_rate=self.config.dropout_rate,
+            num_points_prompt=self.config.num_points_prompt,
+            bbox_change_rate=self.config.bbox_change_rate,
         )
         self.model = LoRA_Sam(self.sam, self.config.lora_rank)
 
@@ -641,6 +651,10 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  lora_ckpt: {self.config.lora_ckpt}")
         self.logger.info(f"  promptmode: {self.config.promptmode}")
         self.logger.info(f"  dropout_rate: {self.config.dropout_rate}")
+        self.logger.info(
+            f"  num_points_prompt: {self.config.num_points_prompt}"
+        )
+        self.logger.info(f"  bbox_change_rate: {self.config.bbox_change_rate}")
 
         self.logger.info(f"data: {self.config.dataset}")
         self.logger.info(f"  data_path: {self.config.data_path}")
