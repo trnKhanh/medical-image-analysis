@@ -302,7 +302,7 @@ class CPCSAMTrainer(BaseTrainer):
             f"batchsz-{self.config.batch_size}",
             f"optimizer-{self.config.optimizer_name}",
             f"lr-{self.config.lr_scheduler_name}",
-            f"lrwarm-{self.config.lr_warmup_iter}"
+            f"lrwarm-{self.config.lr_warmup_iter}",
             f"warmiter-{self.config.warmup_iter}",
             f"startlr-{self.config.start_lr}",
             f"dice-{self.config.dice_weight}",
@@ -1487,7 +1487,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         if self.use_wandb:
             wandb_table = wandb.Table(
-                columns=dataframe_dict.keys(),
+                columns=list(dataframe_dict.keys()),
                 data=list(zip(*list(dataframe_dict.values()))),
             )
             self.wandb_runner.log({"test_performance": wandb_table})
