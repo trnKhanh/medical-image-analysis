@@ -16,15 +16,21 @@ def parse_args():
     parser.add_argument("--patch-size", default=512, nargs="+", type=int)
     parser.add_argument("--image-size", default=512, nargs="+", type=int)
     parser.add_argument(
-        "--sam-name", default="vit_b_dualmask_same_prompt_class_random_large", type=str
+        "--sam-name",
+        default="vit_b_dualmask_same_prompt_class_random_large",
+        type=str,
     )
     parser.add_argument("--model-ckpt", required=True, type=str)
     parser.add_argument("--lora-rank", default=4, type=int)
     parser.add_argument("--lora-ckpt", default=None, type=str)
     parser.add_argument("--promptmode", default=["point"], nargs="+", type=str)
     parser.add_argument("--dropout-rate", default=0.0, type=float)
-    parser.add_argument("--num-points-prompt", default=[1, 2], type=int, nargs="+")
-    parser.add_argument("--bbox-change-rate", default=[0.1, 0.2], type=float, nargs="+")
+    parser.add_argument(
+        "--num-points-prompt", default=[1, 2], type=int, nargs="+"
+    )
+    parser.add_argument(
+        "--bbox-change-rate", default=[0.1, 0.2], type=float, nargs="+"
+    )
     # <<< Model parameters
 
     # >>> Data parameters
@@ -59,6 +65,7 @@ def parse_args():
         "--coe2", dest="consistency_weight_2", default=0.05, type=float
     )
     parser.add_argument("--early-stop-max-patience", default=None, type=int)
+    parser.add_argument("--use-contrastive-loss", action="store_true")
     # <<< Training parameters
 
     # >>> Log parameters

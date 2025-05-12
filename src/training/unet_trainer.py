@@ -23,7 +23,7 @@ from tqdm import tqdm
 from .base_trainer import BaseTrainer
 from datasets.fugc import FUGCDataset
 from losses.compound_losses import DC_and_CE_loss
-from losses.dice import MemoryEfficientSoftDiceLoss, get_tp_fp_fn_tn
+from losses.dice_loss import MemoryEfficientSoftDiceLoss, get_tp_fp_fn_tn
 from metric.metric import HD
 from scheduler.lr_scheduler import PolyLRScheduler
 

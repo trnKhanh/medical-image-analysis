@@ -74,6 +74,41 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         self.num_points_prompt = num_points_prompt
         self.bbox_change_rate = bbox_change_rate
 
+        dim_in = self.mask_decoders[0].transformer_dim // 16 # 16
+        feat_dim = dim_in * 2 # 32
+        num_classes = self.mask_decoders[0].num_mask_tokens
+
+        self.projection_head = nn.Sequential(
+            nn.Linear(dim_in, feat_dim),
+            nn.BatchNorm1d(feat_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, feat_dim)
+        )
+        self.prediction_head = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim),
+            nn.BatchNorm1d(feat_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, feat_dim)
+        )
+
+        for class_c in range(num_classes):
+            selector = nn.Sequential(
+                nn.Linear(feat_dim, feat_dim),
+                nn.BatchNorm1d(feat_dim),
+                nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                nn.Linear(feat_dim, 1)
+            )
+            self.__setattr__('contrastive_class_selector_' + str(class_c), selector)
+
+        for class_c in range(num_classes):
+            selector = nn.Sequential(
+                nn.Linear(feat_dim, feat_dim),
+                nn.BatchNorm1d(feat_dim),
+                nn.LeakyReLU(negative_slope=0.2, inplace=True),
+                nn.Linear(feat_dim, 1)
+            )
+            self.__setattr__('contrastive_class_selector_memory' + str(class_c), selector)
+
     @property
     def device(self) -> Any:
         return self.pixel_mean.device
@@ -210,11 +245,17 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         iou_predictions = [
             torch.zeros(1) for _ in range(len(self.mask_decoders))
         ]
+        dense_features = [
+            torch.zeros(1) for _ in range(len(self.mask_decoders))
+        ]
 
         low_res_logits_r = [
             torch.zeros(1) for _ in range(len(self.mask_decoders))
         ]
         iou_predictions_r = [
+            torch.zeros(1) for _ in range(len(self.mask_decoders))
+        ]
+        dense_features_r = [
             torch.zeros(1) for _ in range(len(self.mask_decoders))
         ]
 
@@ -224,7 +265,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             if id == prompt_idx:
                 continue
 
-            low_res_logits[id], iou_predictions[id], _ = mask_decoder(
+            low_res_logits[id], iou_predictions[id], dense_features[id] = mask_decoder(
                 image_embeddings=image_embeddings,
                 image_pe=self.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
@@ -253,7 +294,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             (
                 low_res_logits[prompt_idx],
                 iou_predictions[prompt_idx],
-                _,
+                dense_features[prompt_idx],
             ) = self.mask_decoders[prompt_idx](
                 image_embeddings=dropout_image_embeddings,
                 image_pe=self.prompt_encoder.get_dense_pe(),
@@ -265,7 +306,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             (
                 low_res_logits_r[prompt_idx],
                 iou_predictions_r[prompt_idx],
-                _,
+                dense_features_r[prompt_idx],
             ) = self.mask_decoders[prompt_idx](
                 image_embeddings=dropout_image_embeddings,
                 image_pe=self.prompt_encoder.get_dense_pe(),
@@ -290,6 +331,8 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
             "iou_predictions": iou_predictions,
             "low_res_logits": low_res_logits,
             "low_res_logits_r": low_res_logits_r,
+            "dense_features": dense_features,
+            "dense_features_r": dense_features_r,
         }
 
         return outputs

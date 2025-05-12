@@ -1,8 +1,8 @@
 from typing import Callable
 
 import torch
-from .dice import MemoryEfficientSoftDiceLoss, DiceLoss
-from .robust_ce_loss import RobustCrossEntropyLoss, TopKLoss
+from .dice_loss import MemoryEfficientSoftDiceLoss, DiceLoss
+from .ce_loss import RobustCrossEntropyLoss, TopKLoss
 from torch import nn
 
 

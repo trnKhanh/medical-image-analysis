@@ -27,7 +27,10 @@ from tqdm import tqdm
 from .base_trainer import BaseTrainer
 from datasets import ACDCDataset, TwoStreamBatchSampler
 from losses.compound_losses import DiceAndCELoss, DualBranchDiceAndCELoss
-from losses.dice import DiceLoss
+from losses.dice_loss import DiceLoss
+from losses.contrastive_loss import PrototypeContrastiveLoss
+from losses.adv_loss import VAT2d
+from memories.feature_memory import FeatureMemory
 from scheduler.lr_scheduler import PolyLRScheduler
 
 from utils import get_path, draw_mask
@@ -121,6 +124,13 @@ class CPCSAMConfig(object):
         consistency_weight_1: float = 0.4,
         consistency_weight_2: float = 0.05,
         early_stop_max_patience: int | None = None,
+        use_contrastive_loss: bool = False,
+        use_adv_loss: bool = False,
+        adv_loss_kwargs: dict = {
+            "xi": 10.0,
+            "epi": 6.0,
+            "ip": 1,
+        },
         # Inference parameters
         stride: int | tuple[int, ...] | list[int] | None = None,
         # Misc parameters
@@ -177,6 +187,9 @@ class CPCSAMConfig(object):
         self.consistency_weight_1 = consistency_weight_1
         self.consistency_weight_2 = consistency_weight_2
         self.early_stop_max_patience = early_stop_max_patience
+        self.use_contrastive_loss = use_contrastive_loss
+        self.use_adv_loss = use_adv_loss
+        self.adv_loss_kwargs = adv_loss_kwargs
         # <<< Training parameters
 
         # >>> Inference parameters
@@ -599,9 +612,9 @@ class CPCSAMTrainer(BaseTrainer):
 
         return optimizer, lr_scheduler
 
-    def _get_loss(self):
+    def _setup_loss(self):
         if self.config.loss_name == "dice+ce":
-            supervised_loss = DiceAndCELoss(
+            self.supervised_loss = DiceAndCELoss(
                 dice_loss=DiceLoss,
                 dice_kwargs={
                     "num_classes": self.config.num_classes,
@@ -612,7 +625,7 @@ class CPCSAMTrainer(BaseTrainer):
                 ce_kwargs={},
                 default_dice_weight=0.8,
             )
-            unsupervised_loss = DualBranchDiceAndCELoss(
+            self.unsupervised_loss = DualBranchDiceAndCELoss(
                 dice_loss=DiceLoss,
                 dice_kwargs={
                     "num_classes": self.config.num_classes,
@@ -626,7 +639,16 @@ class CPCSAMTrainer(BaseTrainer):
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
 
-        return supervised_loss, unsupervised_loss
+        if self.config.use_contrastive_loss:
+            self.contrastive_loss = PrototypeContrastiveLoss(
+                self.model.sam,
+                num_classes=self.config.num_classes,
+                memory_cls=FeatureMemory,
+                memory_kwargs={"elements_per_class": 32},
+            )
+
+        if self.config.use_adv_loss:
+            self.adv_loss = VAT2d(**self.config.adv_loss_kwargs)
 
     def _print_train_info(self):
         self._add_config_file()
@@ -735,7 +757,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.optimizer, self.lr_scheduler = self._get_optimizer(
             self.model,
         )
-        self.supervised_loss, self.unsupervised_loss = self._get_loss()
+        self._setup_loss()
 
         if self.config.maximum_save_metric is None:
             if self.config.save_metric_name == "dice":
@@ -1040,6 +1062,31 @@ class CPCSAMTrainer(BaseTrainer):
             )
             loss1 += supervised_loss
 
+        labeled_features_list = []
+        labeled_predictions_list = []
+
+        unlabeled_features_list = []
+        unlabeled_predictions_list = []
+
+        if self.config.use_contrastive_loss:
+            for i in range(num_decoders):
+                dense_features = outputs["dense_features"][i]
+                soft_masks = outputs["masks"][i].softmax(1)
+
+                labeled_features_list.append(
+                    dense_features[: self.config.labeled_batch_size]
+                )
+                labeled_predictions_list.append(
+                    soft_masks[: self.config.labeled_batch_size].argmax(1)
+                )
+
+                unlabeled_features_list.append(
+                    dense_features[self.config.labeled_batch_size :]
+                )
+                unlabeled_predictions_list.append(
+                    soft_masks[self.config.labeled_batch_size :].argmax(1)
+                )
+
         # the second round
         supervised_loss_round2 = torch.zeros(1, device=self.device)
         supervised_loss_round2_r = torch.zeros(1, device=self.device)
@@ -1059,12 +1106,59 @@ class CPCSAMTrainer(BaseTrainer):
                     self.config.promptmode,
                     image_embeddings,
                 )
+                dense_features = outputs_round2["dense_features"][prompt_idx]
+                dense_features_r = outputs_round2["dense_features_r"][
+                    prompt_idx
+                ]
+
                 low_res_logits_prompt = outputs_round2["low_res_logits"][
                     prompt_idx
                 ]
                 low_res_logits_prompt_r = outputs_round2["low_res_logits_r"][
                     prompt_idx
                 ]
+                # Update the list of labeled and unlabled features/predictions
+                # if we use contrastive loss
+                if self.config.use_contrastive_loss:
+                    labeled_features_list.append(
+                        dense_features[: self.config.labeled_batch_size]
+                    )
+                    labeled_features_list.append(
+                        dense_features_r[: self.config.labeled_batch_size]
+                    )
+
+                    unlabeled_features_list.append(
+                        dense_features[self.config.labeled_batch_size :]
+                    )
+                    unlabeled_features_list.append(
+                        dense_features_r[self.config.labeled_batch_size :]
+                    )
+
+                    labeled_predictions_list.append(
+                        low_res_logits_prompt[: self.config.labeled_batch_size]
+                        .softmax(1)
+                        .argmax(1)
+                    )
+                    labeled_predictions_list.append(
+                        low_res_logits_prompt_r[
+                            : self.config.labeled_batch_size
+                        ]
+                        .softmax(1)
+                        .argmax(1)
+                    )
+
+                    unlabeled_predictions_list.append(
+                        low_res_logits_prompt[self.config.labeled_batch_size :]
+                        .softmax(1)
+                        .argmax(1)
+                    )
+                    unlabeled_predictions_list.append(
+                        low_res_logits_prompt_r[
+                            self.config.labeled_batch_size :
+                        ]
+                        .softmax(1)
+                        .argmax(1)
+                    )
 
                 # Compute the supervised loss of the prompt output
                 labeled_low_res_logits_prompt = low_res_logits_prompt[
@@ -1128,11 +1222,40 @@ class CPCSAMTrainer(BaseTrainer):
                 + self.config.consistency_weight_2 * consistency_loss_round2_r
             )
 
-        loss = loss1 + loss2
+        contrastive_loss = torch.zeros(1, device=self.device)
+        if self.config.use_contrastive_loss:
+            labeled_features = torch.cat(labeled_features_list, dim=0)
+            labeled_predictions = torch.cat(labeled_predictions_list, dim=0)
+            unlabeled_features = torch.cat(unlabeled_features_list, dim=0)
+            unlabeled_predictions = torch.cat(unlabeled_predictions_list, dim=0)
+            labeled_labels = labeled_label_batch.repeat(
+                len(labeled_features_list), 1, 1
+            )
+
+            self.contrastive_loss.update_memory(
+                features=labeled_features,
+                predictions=labeled_predictions,
+                labels=labeled_labels,
+            )
+            contrastive_loss = contrastive_loss + self.contrastive_loss(
+                labeled_features, labeled_labels
+            )
+            contrastive_loss = contrastive_loss + self.contrastive_loss(
+                unlabeled_features, unlabeled_predictions
+            )
+
+        loss = loss1 + loss2 + contrastive_loss
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        losses = torch.Tensor([loss.detach(), loss1.detach(), loss2.detach()])
+        losses = torch.Tensor(
+            [
+                loss.detach(),
+                loss1.detach(),
+                loss2.detach(),
+                contrastive_loss.detach(),
+            ]
+        )
         self.logger.info(f"Loss: {losses.tolist()}")
         self.epoch_train_outputs.append({"loss": losses})
         self.logger.info(f"")
@@ -1144,6 +1267,7 @@ class CPCSAMTrainer(BaseTrainer):
                 "train/iter/losses/loss": losses[0],
                 "train/iter/losses/loss1": losses[1],
                 "train/iter/losses/loss2": losses[2],
+                "train/iter/losses/contrastive_loss": losses[3],
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
             }
