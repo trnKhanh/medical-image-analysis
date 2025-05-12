@@ -32,6 +32,7 @@ from losses.contrastive_loss import PrototypeContrastiveLoss
 from losses.adv_loss import VAT2d
 from memories.feature_memory import FeatureMemory
 from scheduler.lr_scheduler import PolyLRScheduler
+from scheduler.ramps import SigmoidRampUp
 
 from utils import get_path, draw_mask
 from models.segment_anything import (
@@ -125,7 +126,10 @@ class CPCSAMConfig(object):
         consistency_weight_2: float = 0.05,
         early_stop_max_patience: int | None = None,
         use_contrastive_loss: bool = False,
+        contrastive_weight: float = 0.01,
+        contrastive_weight_rampup: int = 10000,
         use_adv_loss: bool = False,
+        adv_weight: float = 0.1,
         adv_loss_kwargs: dict = {
             "xi": 10.0,
             "epi": 6.0,
@@ -188,7 +192,10 @@ class CPCSAMConfig(object):
         self.consistency_weight_2 = consistency_weight_2
         self.early_stop_max_patience = early_stop_max_patience
         self.use_contrastive_loss = use_contrastive_loss
+        self.contrastive_weight = contrastive_weight
+        self.contrastive_weight_rampup = contrastive_weight_rampup
         self.use_adv_loss = use_adv_loss
+        self.adv_weight = adv_weight
         self.adv_loss_kwargs = adv_loss_kwargs
         # <<< Training parameters
 
@@ -646,6 +653,10 @@ class CPCSAMTrainer(BaseTrainer):
                 memory_cls=FeatureMemory,
                 memory_kwargs={"elements_per_class": 32},
             )
+            self.contrastive_weight_rampup = SigmoidRampUp(
+                self.config.contrastive_weight,
+                max_steps=self.config.contrastive_weight_rampup,
+            )
 
         if self.config.use_adv_loss:
             self.adv_loss = VAT2d(**self.config.adv_loss_kwargs)
@@ -720,6 +731,13 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(
             f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
+        if self.config.use_contrastive_loss:
+            self.logger.info(
+                f"contrastive_weight: {self.config.contrastive_weight}"
+            )
+
+        if self.config.use_adv_loss:
+            self.logger.info(f"adv_weight: {self.config.adv_weight}")
 
         self._remove_config_file()
 
@@ -1231,6 +1249,11 @@ class CPCSAMTrainer(BaseTrainer):
             labeled_labels = labeled_label_batch.repeat(
                 len(labeled_features_list), 1, 1
             )
+            print(labeled_features.shape)
+            print(labeled_predictions.shape)
+            print(unlabeled_features.shape)
+            print(unlabeled_predictions.shape)
+            print(labeled_labels.shape)
 
             self.contrastive_loss.update_memory(
                 features=labeled_features,
@@ -1244,7 +1267,15 @@ class CPCSAMTrainer(BaseTrainer):
                 unlabeled_features, unlabeled_predictions
             )
 
-        loss = loss1 + loss2 + contrastive_loss
+        loss = loss1 + loss2
+
+        if self.config.use_contrastive_loss:
+            loss = (
+                loss
+                + self.contrastive_weight_rampup.step(self.current_iter)
+                * contrastive_loss
+            )
+
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
