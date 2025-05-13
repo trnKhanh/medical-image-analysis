@@ -122,14 +122,17 @@ class CPCSAMConfig(object):
         maximum_save_metric: bool | None = None,
         loss_name: Literal["dice+ce"] = "dice+ce",
         dice_weight: float = 0.8,
+        loss2_weight: float = 1.0,
         consistency_weight_1: float = 0.4,
         consistency_weight_2: float = 0.05,
         early_stop_max_patience: int | None = None,
         use_contrastive_loss: bool = False,
-        contrastive_weight: float = 0.01,
-        contrastive_weight_rampup: int = 10000,
+        loss3_weight: float = 0.1,
+        contrastive_weight: float = 0.1,
         use_adv_loss: bool = False,
-        adv_weight: float = 0.1,
+        adv_weight: float = 1.0,
+        weight_rampup_interval: int = 100,
+        weight_rampup_length: int = 200,
         adv_loss_kwargs: dict = {
             "xi": 10.0,
             "epi": 6.0,
@@ -188,15 +191,18 @@ class CPCSAMConfig(object):
         self.maximum_save_metric = maximum_save_metric
         self.loss_name = loss_name
         self.dice_weight = dice_weight
+        self.loss2_weight = loss2_weight
         self.consistency_weight_1 = consistency_weight_1
         self.consistency_weight_2 = consistency_weight_2
         self.early_stop_max_patience = early_stop_max_patience
+        self.loss3_weight = loss3_weight
         self.use_contrastive_loss = use_contrastive_loss
         self.contrastive_weight = contrastive_weight
-        self.contrastive_weight_rampup = contrastive_weight_rampup
         self.use_adv_loss = use_adv_loss
         self.adv_weight = adv_weight
         self.adv_loss_kwargs = adv_loss_kwargs
+        self.weight_rampup_length = weight_rampup_length
+        self.weight_rampup_interval = weight_rampup_interval
         # <<< Training parameters
 
         # >>> Inference parameters
@@ -643,6 +649,11 @@ class CPCSAMTrainer(BaseTrainer):
                 ce_kwargs={},
                 default_dice_weight=0.8,
             )
+            self.loss2_weight_rampup = SigmoidRampUp(
+                self.config.loss2_weight,
+                max_steps=self.config.weight_rampup_length,
+                interval=self.config.weight_rampup_interval,
+            )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
 
@@ -653,13 +664,15 @@ class CPCSAMTrainer(BaseTrainer):
                 memory_cls=FeatureMemory,
                 memory_kwargs={"elements_per_class": 32},
             )
-            self.contrastive_weight_rampup = SigmoidRampUp(
-                self.config.contrastive_weight,
-                max_steps=self.config.contrastive_weight_rampup,
-            )
 
         if self.config.use_adv_loss:
             self.adv_loss = VAT2d(**self.config.adv_loss_kwargs)
+
+        self.loss3_weight_rampup = SigmoidRampUp(
+            self.config.loss3_weight,
+            max_steps=self.config.weight_rampup_length,
+            interval=self.config.weight_rampup_interval,
+        )
 
     def _print_train_info(self):
         self._add_config_file()
@@ -722,6 +735,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
         self.logger.info(f"dice_weight: {self.config.dice_weight}")
+        self.logger.info(f"loss2_weight: {self.config.loss2_weight}")
         self.logger.info(
             f"consistency_weight_1: {self.config.consistency_weight_1}"
         )
@@ -731,6 +745,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(
             f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
+        self.logger.info(f"loss3_weight: {self.config.loss3_weight}")
         if self.config.use_contrastive_loss:
             self.logger.info(
                 f"contrastive_weight: {self.config.contrastive_weight}"
@@ -738,6 +753,12 @@ class CPCSAMTrainer(BaseTrainer):
 
         if self.config.use_adv_loss:
             self.logger.info(f"adv_weight: {self.config.adv_weight}")
+        self.logger.info(
+            f"weight_rampup_interval: {self.config.weight_rampup_interval}"
+        )
+        self.logger.info(
+            f"weight_rampup_length: {self.config.weight_rampup_length}"
+        )
 
         self._remove_config_file()
 
@@ -880,6 +901,7 @@ class CPCSAMTrainer(BaseTrainer):
                 "train/epoch/losses/loss": train_losses[0],
                 "train/epoch/losses/loss1": train_losses[1],
                 "train/epoch/losses/loss2": train_losses[2],
+                "train/epoch/losses/loss3": train_losses[3],
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
             }
@@ -943,6 +965,34 @@ class CPCSAMTrainer(BaseTrainer):
             raise ValueError(
                 f"{self.config.save_metric_name} is not a valid save metric"
             )
+
+        if self.use_wandb:
+            valid_metric = {
+                "valid/metric/dsc": metric[:, 0].mean().item(),
+                "valid/metric/dsc_prompt": prompt_metric[:, 0].mean().item(),
+                "valid/metric/hd95": metric[:, 1].mean().item(),
+                "valid/metric/hd95_prompt": prompt_metric[:, 1].mean().item(),
+                "valid/metric/loss": loss,
+                "valid/metric/loss_prompt": prompt_loss,
+                "train_epoch": self.current_epoch,
+                "train_iter": self.current_iter,
+                "valid_step": self.current_iter,
+            }
+            for i in range(self.config.num_classes):
+                valid_metric[f"valid/metric_per_cls/dsc/class_{i}"] = metric[
+                    i, 0
+                ].item()
+                valid_metric[f"valid/metric_per_cls/dsc_prompt/class_{i}"] = (
+                    prompt_metric[i, 0].item()
+                )
+                valid_metric[f"valid/metric_per_cls/hd95/class_{i}"] = metric[
+                    i, 1
+                ].item()
+                valid_metric[f"valid/metric_per_cls/hd95_prompt/class_{i}"] = (
+                    prompt_metric[i, 1].item()
+                )
+
+            self.wandb_runner.log(valid_metric)
 
         is_improved = False
 
@@ -1141,39 +1191,16 @@ class CPCSAMTrainer(BaseTrainer):
                     labeled_features_list.append(
                         dense_features[: self.config.labeled_batch_size]
                     )
-                    labeled_features_list.append(
-                        dense_features_r[: self.config.labeled_batch_size]
-                    )
-
                     unlabeled_features_list.append(
                         dense_features[self.config.labeled_batch_size :]
                     )
-                    unlabeled_features_list.append(
-                        dense_features_r[self.config.labeled_batch_size :]
-                    )
-
                     labeled_predictions_list.append(
                         low_res_logits_prompt[: self.config.labeled_batch_size]
                         .softmax(1)
                         .argmax(1)
                     )
-                    labeled_predictions_list.append(
-                        low_res_logits_prompt_r[
-                            : self.config.labeled_batch_size
-                        ]
-                        .softmax(1)
-                        .argmax(1)
-                    )
-
                     unlabeled_predictions_list.append(
                         low_res_logits_prompt[self.config.labeled_batch_size :]
-                        .softmax(1)
-                        .argmax(1)
-                    )
-                    unlabeled_predictions_list.append(
-                        low_res_logits_prompt_r[
-                            self.config.labeled_batch_size :
-                        ]
                         .softmax(1)
                         .argmax(1)
                     )
@@ -1249,11 +1276,6 @@ class CPCSAMTrainer(BaseTrainer):
             labeled_labels = labeled_label_batch.repeat(
                 len(labeled_features_list), 1, 1
             )
-            print(labeled_features.shape)
-            print(labeled_predictions.shape)
-            print(unlabeled_features.shape)
-            print(unlabeled_predictions.shape)
-            print(labeled_labels.shape)
 
             self.contrastive_loss.update_memory(
                 features=labeled_features,
@@ -1267,14 +1289,15 @@ class CPCSAMTrainer(BaseTrainer):
                 unlabeled_features, unlabeled_predictions
             )
 
-        loss = loss1 + loss2
+        loss3 = torch.zeros(1, device=self.device)
 
         if self.config.use_contrastive_loss:
-            loss = (
-                loss
-                + self.contrastive_weight_rampup.step(self.current_iter)
-                * contrastive_loss
-            )
+            loss3 = loss3 + self.config.contrastive_weight * contrastive_loss
+
+        loss2_weight = self.loss2_weight_rampup.step(self.current_iter)
+        loss3_weight = self.loss3_weight_rampup.step(self.current_iter)
+
+        loss = loss1 + loss2_weight * loss2 + loss3_weight * loss3
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -1284,7 +1307,7 @@ class CPCSAMTrainer(BaseTrainer):
                 loss.detach(),
                 loss1.detach(),
                 loss2.detach(),
-                contrastive_loss.detach(),
+                loss3.detach(),
             ]
         )
         self.logger.info(f"Loss: {losses.tolist()}")
@@ -1295,10 +1318,12 @@ class CPCSAMTrainer(BaseTrainer):
             lr = self.lr_scheduler.get_last_lr()[0]
             train_metric = {
                 "train/iter/lr": lr,
+                "train/iter/loss2_weight": loss2_weight,
+                "train/iter/loss3_weight": loss3_weight,
                 "train/iter/losses/loss": losses[0],
                 "train/iter/losses/loss1": losses[1],
                 "train/iter/losses/loss2": losses[2],
-                "train/iter/losses/contrastive_loss": losses[3],
+                "train/iter/losses/loss3": losses[3],
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
             }
@@ -1341,34 +1366,6 @@ class CPCSAMTrainer(BaseTrainer):
         prompt_metric = torch.stack(
             [o["prompt_metric"] for o in self.epoch_valid_outputs]
         ).mean(0)
-
-        if self.use_wandb:
-            valid_metric = {
-                "valid/metric/dsc": metric[:, 0].mean().item(),
-                "valid/metric/dsc_prompt": prompt_metric[:, 0].mean().item(),
-                "valid/metric/hd95": metric[:, 1].mean().item(),
-                "valid/metric/hd95_prompt": prompt_metric[:, 1].mean().item(),
-                "valid/metric/loss": loss,
-                "valid/metric/loss_prompt": prompt_loss,
-                "train_epoch": self.current_epoch,
-                "train_iter": self.current_iter,
-                "valid_step": self.current_iter,
-            }
-            for i in range(self.config.num_classes):
-                valid_metric[f"valid/metric_per_cls/dsc/class_{i}"] = metric[
-                    i, 0
-                ].item()
-                valid_metric[f"valid/metric_per_cls/dsc_prompt/class_{i}"] = (
-                    prompt_metric[i, 0].item()
-                )
-                valid_metric[f"valid/metric_per_cls/hd95/class_{i}"] = metric[
-                    i, 1
-                ].item()
-                valid_metric[f"valid/metric_per_cls/hd95_prompt/class_{i}"] = (
-                    prompt_metric[i, 1].item()
-                )
-
-            self.wandb_runner.log(valid_metric)
 
         self.valid_tqdm.set_postfix(
             dict(
@@ -1424,6 +1421,11 @@ class CPCSAMTrainer(BaseTrainer):
         self.perform_real_test()
 
     def perform_real_test(self):
+        try:
+            self.load_state_dict(self.work_path / "best_model")
+        except:
+            pass
+
         test_dataset = ACDCDataset(
             data_path=self.config.data_path,
             split="test",
@@ -1517,12 +1519,18 @@ class CPCSAMTrainer(BaseTrainer):
 
     def load_state_dict(self, save_path: str | Path):
         save_path = get_path(save_path)
-        self.load_model_checkpoint(save_path / "model.pth")
+        try:
+            self.load_model_checkpoint(save_path / "model.pth")
+        except:
+            pass
 
-        training_state = torch.load(save_path / "training_state.pth")
-        self.optimizer.load_state_dict(training_state["optimizer"])
-        self.current_epoch = training_state["current_epoch"]
-        self.current_iter = training_state["current_iter"]
+        try:
+            training_state = torch.load(save_path / "training_state.pth")
+            self.optimizer.load_state_dict(training_state["optimizer"])
+            self.current_epoch = training_state["current_epoch"]
+            self.current_iter = training_state["current_iter"]
+        except:
+            pass
 
     def save_state_dict(
         self, save_path: str | Path, save_training_state: bool = False

@@ -58,6 +58,7 @@ def parse_args():
     parser.add_argument("--save-metric", default="dice", type=str)
     parser.add_argument("--loss", default="dice+ce", type=str)
     parser.add_argument("--dice-weight", default=0.8, type=float)
+    parser.add_argument("--loss2-weight", default=1.0, type=float)
     parser.add_argument(
         "--coe1", dest="consistency_weight_1", default=0.4, type=float
     )
@@ -65,10 +66,13 @@ def parse_args():
         "--coe2", dest="consistency_weight_2", default=0.05, type=float
     )
     parser.add_argument("--early-stop-max-patience", default=None, type=int)
+    parser.add_argument("--loss3-weight", default=0.1, type=float)
     parser.add_argument("--use-contrastive-loss", action="store_true")
-    parser.add_argument("--contrastive-weight", default=0.01, type=float)
+    parser.add_argument("--contrastive-weight", default=0.1, type=float)
     parser.add_argument("--use-adv-loss", action="store_true")
-    parser.add_argument("--adv-weight", default=0.1, type=float)
+    parser.add_argument("--adv-weight", default=1.0, type=float)
+    parser.add_argument("--weight-rampup-interval", default=100, type=int)
+    parser.add_argument("--weight-rampup-length", default=200, type=int)
 
     # <<< Training parameters
 

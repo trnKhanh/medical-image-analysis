@@ -48,7 +48,7 @@ class DiceLoss(nn.Module):
         )
 
         loss = 0.0
-        start_index = 1 if self.do_bg else 0
+        start_index = 0 if self.do_bg else 1
         for i in range(start_index, self.num_classes):
             dice = self._dice_loss(inputs[:, i], target[:, i])
             loss += dice * weight[i]
