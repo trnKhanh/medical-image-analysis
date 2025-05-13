@@ -68,6 +68,7 @@ def parse_args():
     parser.add_argument("--early-stop-max-patience", default=None, type=int)
     parser.add_argument("--loss3-weight", default=0.1, type=float)
     parser.add_argument("--use-contrastive-loss", action="store_true")
+    parser.add_argument("--contrastive-dropout-rate", default=0.0, type=float)
     parser.add_argument("--contrastive-weight", default=0.1, type=float)
     parser.add_argument("--use-adv-loss", action="store_true")
     parser.add_argument("--adv-weight", default=1.0, type=float)

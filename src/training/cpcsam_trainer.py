@@ -127,6 +127,7 @@ class CPCSAMConfig(object):
         consistency_weight_2: float = 0.05,
         early_stop_max_patience: int | None = None,
         use_contrastive_loss: bool = False,
+        contrastive_dropout_rate: float = 0.0,
         loss3_weight: float = 0.1,
         contrastive_weight: float = 0.1,
         use_adv_loss: bool = False,
@@ -197,6 +198,7 @@ class CPCSAMConfig(object):
         self.early_stop_max_patience = early_stop_max_patience
         self.loss3_weight = loss3_weight
         self.use_contrastive_loss = use_contrastive_loss
+        self.contrastive_dropout_rate = contrastive_dropout_rate
         self.contrastive_weight = contrastive_weight
         self.use_adv_loss = use_adv_loss
         self.adv_weight = adv_weight
@@ -306,6 +308,7 @@ class CPCSAMTrainer(BaseTrainer):
             f"bbox-{self.config.bbox_change_rate}",
             f"labeled-{self.config.labeled_num}",
             f"batchsz-{self.config.batch_size}",
+            f"epoch-{self.config.num_epochs}",
             f"optimizer-{self.config.optimizer_name}",
             f"lr-{self.config.lr_scheduler_name}",
             f"lrwarm-{self.config.lr_warmup_iter}",
@@ -314,8 +317,11 @@ class CPCSAMTrainer(BaseTrainer):
             f"dice-{self.config.dice_weight}",
             f"coe1-{self.config.consistency_weight_1}",
             f"coe2-{self.config.consistency_weight_2}",
-            f"epoch-{self.config.num_epochs}",
         ]
+        if self.config.use_contrastive_loss:
+            snapshot_list.append("contrastive")
+        if self.config.use_adv_loss:
+            snapshot_list.append("adv")
         if self.config.exp_name:
             snapshot_list.append(self.config.exp_name)
         snapshot_str = "_".join(snapshot_list)
@@ -747,6 +753,9 @@ class CPCSAMTrainer(BaseTrainer):
         )
         self.logger.info(f"loss3_weight: {self.config.loss3_weight}")
         if self.config.use_contrastive_loss:
+            self.logger.info(
+                f"contrastive_dropout_rate: {self.config.contrastive_dropout_rate}"
+            )
             self.logger.info(
                 f"contrastive_weight: {self.config.contrastive_weight}"
             )
@@ -1283,10 +1292,14 @@ class CPCSAMTrainer(BaseTrainer):
                 labels=labeled_labels,
             )
             contrastive_loss = contrastive_loss + self.contrastive_loss(
-                labeled_features, labeled_labels
+                labeled_features,
+                labeled_labels,
+                self.config.contrastive_dropout_rate,
             )
             contrastive_loss = contrastive_loss + self.contrastive_loss(
-                unlabeled_features, unlabeled_predictions
+                unlabeled_features,
+                unlabeled_predictions,
+                self.config.contrastive_dropout_rate,
             )
 
         loss3 = torch.zeros(1, device=self.device)

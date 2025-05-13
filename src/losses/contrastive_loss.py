@@ -50,7 +50,7 @@ class PrototypeContrastiveLoss(nn.Module):
             self.model, proj_correct_features, correct_labels
         )
 
-    def forward(self, features: torch.Tensor, class_labels: torch.Tensor):
+    def forward(self, features: torch.Tensor, class_labels: torch.Tensor, dropout_rate: float = 0.0):
         B, C, H, W = features.shape
         features = features.permute(0, 2, 3, 1).reshape(-1, C).contiguous()
         class_labels = class_labels.reshape(-1)
@@ -64,6 +64,9 @@ class PrototypeContrastiveLoss(nn.Module):
             mask_c = class_labels == c
             features_c = pred_features[mask_c, :]
             memory_c = self.prototype_memory.memory[c]  # N, C
+
+            features_c_ids = torch.multinomial(torch.ones(features_c.shape[0]), int(features_c.shape[0] * (1 - dropout_rate)))
+            features_c = features_c[features_c_ids]
 
             # get the self-attention MLPs both for memory features vectors (projected vectors) and network feature vectors (predicted vectors)
             selector = self.model.__getattr__(
