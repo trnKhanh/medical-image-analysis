@@ -17,7 +17,7 @@ class SigmoidRampUp(BaseRampUp):
         final_value: float,
         max_steps: int,
         interval: int = 1,
-        exponent: float = 0.5,
+        exponent: float = 5.0,
     ):
         self.final_value = final_value
         self.max_steps = max_steps
