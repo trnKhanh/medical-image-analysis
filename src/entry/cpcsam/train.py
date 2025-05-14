@@ -77,8 +77,6 @@ def parse_args():
     parser.add_argument("--contrastive-weight", default=0.1, type=float)
     parser.add_argument("--use-adv-loss", action="store_true")
     parser.add_argument("--adv-weight", default=1.0, type=float)
-    parser.add_argument("--weight-rampup-interval", default=100, type=int)
-    parser.add_argument("--weight-rampup-length", default=200, type=int)
 
     # <<< Training parameters
 

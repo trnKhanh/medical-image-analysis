@@ -1387,10 +1387,12 @@ class CPCSAMTrainer(BaseTrainer):
         self.perform_real_test()
 
     def perform_real_test(self):
-        try:
-            self.load_state_dict(self.work_path / "best_model")
-        except:
-            pass
+        best_model_path = self.work_path / "best_model"
+        if best_model_path.exists():
+            try:
+                self.load_state_dict(self.work_path / "best_model")
+            except:
+                pass
 
         test_dataset = ACDCDataset(
             data_path=self.config.data_path,
@@ -1485,18 +1487,16 @@ class CPCSAMTrainer(BaseTrainer):
 
     def load_state_dict(self, save_path: str | Path):
         save_path = get_path(save_path)
-        try:
-            self.load_model_checkpoint(save_path / "model.pth")
-        except:
-            pass
+        model_path = save_path / "model.pth"
+        training_state_path = save_path / "training_state.pth"
+        if model_path.is_file():
+            self.load_model_checkpoint(model_path)
 
-        try:
-            training_state = torch.load(save_path / "training_state.pth")
+        if training_state_path.is_file():
+            training_state = torch.load(training_state_path)
             self.optimizer.load_state_dict(training_state["optimizer"])
             self.current_epoch = training_state["current_epoch"]
             self.current_iter = training_state["current_iter"]
-        except:
-            pass
 
     def save_state_dict(
         self, save_path: str | Path, save_training_state: bool = False
