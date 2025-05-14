@@ -23,6 +23,9 @@ def draw_mask(image, mask, opacity=0.2):
     image = np.array(image)
     mask = np.array(mask)
 
+    if image.ndim == 2:
+        image = np.expand_dims(image, -1)
+
     class_colors = {
         1: np.array([255, 0, 0], dtype=np.uint8),
         2: np.array([0, 255, 0], dtype=np.uint8),
@@ -30,6 +33,9 @@ def draw_mask(image, mask, opacity=0.2):
         4: np.array([128, 0, 255], dtype=np.uint8),
     }
     visualized_image = np.copy(image)
+    if image.shape[-1] == 1:
+        visualized_image = visualized_image.repeat(3, -1)
+
     for class_id in class_colors.keys():
         class_mask = mask == class_id
         visualized_image[class_mask] = opacity * class_colors[class_id] + (1 - opacity) * visualized_image[class_mask]

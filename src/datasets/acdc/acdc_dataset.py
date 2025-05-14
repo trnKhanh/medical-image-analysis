@@ -14,6 +14,7 @@ from utils import get_path
 
 
 class ACDCDataset(BaseDataset):
+    CLASSES = {0: "bg", 1: "RV", 2: "Myo", 3: "LV"}
     RAW_DIR = "ACDC_raw"
 
     PROCESSED_DIR = "ACDC"
@@ -137,7 +138,6 @@ class ACDCDataset(BaseDataset):
             image = image.repeat(3, 1, 1)
         else:
             image = image.repeat(3, 1, 1, 1)
-
 
         data: dict = {"image": image, "label": label}
 

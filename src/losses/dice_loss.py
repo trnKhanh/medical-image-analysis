@@ -36,7 +36,9 @@ class DiceLoss(nn.Module):
     ):
         if softmax:
             inputs = torch.softmax(inputs, dim=1)
-        target = self._one_hot_encoder(target)
+
+        if inputs.size() != target.size():
+            target = self._one_hot_encoder(target)
 
         if weight is None:
             weight = [1.0] * self.num_classes
@@ -48,7 +50,7 @@ class DiceLoss(nn.Module):
         )
 
         loss = 0.0
-        start_index = 1 if self.do_bg else 0
+        start_index = 0 if self.do_bg else 1
         for i in range(start_index, self.num_classes):
             dice = self._dice_loss(inputs[:, i], target[:, i])
             loss += dice * weight[i]

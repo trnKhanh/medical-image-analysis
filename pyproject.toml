@@ -17,6 +17,7 @@ requires-python = ">=3.10"
 dependencies = [
   "torch",
   "torchvision",
+  "wandb",
   "numpy<2",
   "monai", 
   "rich",
@@ -27,7 +28,8 @@ dependencies = [
   "nnunetv2",
   "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
   "SimpleITK",
-  "medpy"
+  "h5py",
+  "medpy",
 ]
 dynamic = ["version"]
 
