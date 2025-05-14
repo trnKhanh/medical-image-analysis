@@ -1051,16 +1051,17 @@ class CPCSAMTrainer(BaseTrainer):
                 f"average_hd95={avg_hd.item():.4f}",
                 f"loss={loss.item():.4f}",
             ]
-            self.wandb_runner.alert(
-                title="Improved Performance",
-                text="; ".join(text_lines),
-                level="INFO",
-            )
+            if self.use_wandb:
+                self.wandb_runner.alert(
+                    title="Improved Performance",
+                    text="; ".join(text_lines),
+                    level="INFO",
+                )
         else:
             self.current_patience += 1
             if self.config.early_stop_max_patience:
                 alert_threshold = self.config.early_stop_max_patience * 0.5
-                if self.current_patience >= alert_threshold:
+                if self.current_patience >= alert_threshold and self.use_wandb:
                     self.wandb_runner.alert(
                         title="Performance Stagnation",
                         text=f"Performance is not improved for {self.current_patience} step",
@@ -1410,6 +1411,8 @@ class CPCSAMTrainer(BaseTrainer):
                 self.load_state_dict(self.work_path / "best_model")
             except:
                 pass
+
+        self.model.to(self.device)
 
         test_dataset = ACDCDataset(
             data_path=self.config.data_path,
