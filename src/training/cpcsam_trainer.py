@@ -1028,7 +1028,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.current_patience = 0
             text_lines = [
                 f"iter={self.current_iter}",
-                f"epoch={self.current_epoch})",
+                f"epoch={self.current_epoch}",
                 f"metric={self._best_valid_metric.item():.4f}",
                 f"dsc="
                 + "["
@@ -1059,7 +1059,7 @@ class CPCSAMTrainer(BaseTrainer):
                     )
 
         self._valid_end_time = time.time()
-        time_elapsed = self._valid_start_time - self._valid_start_time
+        time_elapsed = self._valid_end_time - self._valid_start_time
         self.logger.info(f"current_patience: {self.current_patience}")
         self.logger.info(f"Valid time elapsed: {time_elapsed:.3f} seconds")
 
@@ -1074,6 +1074,8 @@ class CPCSAMTrainer(BaseTrainer):
 
     def train_step(self, sampled_batch):
         self.model.train()
+
+        _train_step_start_time = time.time()
 
         self.logger.info(f"Iteration {self.current_iter}:")
 
@@ -1304,7 +1306,6 @@ class CPCSAMTrainer(BaseTrainer):
         )
         self.logger.info(f"Loss: {losses.tolist()}")
         self.epoch_train_outputs.append({"loss": losses})
-        self.logger.info(f"")
 
         if self.use_wandb:
             lr = self.lr_scheduler.get_last_lr()[0]
@@ -1321,6 +1322,11 @@ class CPCSAMTrainer(BaseTrainer):
             }
             self.wandb_runner.log(train_metric)
 
+        _train_step_end_time = time.time()
+        time_elapsed = _train_step_end_time - _train_step_start_time
+        self.logger.info(f"Iteration time elapsed: {time_elapsed:.3f} seconds")
+
+        self.logger.info(f"")
         self.current_iter += 1
 
     def valid_step(self, sampled_batch):

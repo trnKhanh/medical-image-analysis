@@ -60,6 +60,33 @@ class PrototypeContrastiveLoss(nn.Module):
         features = features.permute(0, 2, 3, 1).reshape(-1, C).contiguous()
         class_labels = class_labels.reshape(-1)
 
+        retain_feature_list = []
+        retain_label_list = []
+        for c in range(self.num_classes):
+            mask_c = class_labels == c
+            features_c = features[mask_c, :]
+            labels_c = class_labels[mask_c]
+
+            retain_num = int(features_c.shape[0] * (1 - dropout_rate))
+            if retain_num > 0:
+                features_c_ids = torch.multinomial(
+                    torch.ones(features_c.shape[0]), retain_num
+                )
+                features_c = features_c[features_c_ids]
+                labels_c = labels_c[features_c_ids]
+
+                
+                retain_feature_list.append(features_c)
+                retain_label_list.append(labels_c)
+            else:
+                continue
+
+        if len(retain_feature_list) == 0:
+            return torch.zeros(1, device=features.device)
+
+        features = torch.cat(retain_feature_list, dim=0)
+        class_labels = torch.cat(retain_label_list, dim=0)
+
         pred_features = self.model.prediction_head(
             self.model.projection_head(features)
         )
@@ -69,13 +96,6 @@ class PrototypeContrastiveLoss(nn.Module):
             mask_c = class_labels == c
             features_c = pred_features[mask_c, :]
             memory_c = self.prototype_memory.memory[c]  # N, C
-
-            retain_num = int(features_c.shape[0] * (1 - dropout_rate))
-            if retain_num > 0:
-                features_c_ids = torch.multinomial(
-                    torch.ones(features_c.shape[0]), retain_num
-                )
-                features_c = features_c[features_c_ids]
 
             # get the self-attention MLPs both for memory features vectors (projected vectors) and network feature vectors (predicted vectors)
             selector = self.model.__getattr__(
