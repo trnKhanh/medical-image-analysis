@@ -120,20 +120,25 @@ class CPCSAMConfig(object):
         valid_freq_iter: int = 200,
         save_metric_name: Literal["dice", "hd", "loss"] = "dice",
         maximum_save_metric: bool | None = None,
+        ## Loss parameters
         loss_name: Literal["dice+ce"] = "dice+ce",
         dice_weight: float = 0.8,
+        ### Loss 2: cross-prompting loss
         loss2_weight: float = 1.0,
+        loss2_weight_rampup_interval: int = 100,
+        loss2_weight_rampup_iter: int = 0,
         consistency_weight_1: float = 0.4,
         consistency_weight_2: float = 0.05,
         early_stop_max_patience: int | None = None,
+        ### Loss 3: contrastive loss
+        loss3_weight: float = 0.1,
+        loss3_weight_rampup_interval: int = 100,
+        loss3_weight_rampup_iter: int = 15000,
         use_contrastive_loss: bool = False,
         contrastive_dropout_rate: float = 0.0,
-        loss3_weight: float = 0.1,
         contrastive_weight: float = 0.1,
         use_adv_loss: bool = False,
         adv_weight: float = 1.0,
-        weight_rampup_interval: int = 100,
-        weight_rampup_length: int = 200,
         adv_loss_kwargs: dict = {
             "xi": 10.0,
             "epi": 6.0,
@@ -192,19 +197,23 @@ class CPCSAMConfig(object):
         self.maximum_save_metric = maximum_save_metric
         self.loss_name = loss_name
         self.dice_weight = dice_weight
+        # > Loss 2: cross-prompting loss
         self.loss2_weight = loss2_weight
+        self.loss2_weight_rampup_interval = loss2_weight_rampup_interval
+        self.loss2_weight_rampup_iter = loss2_weight_rampup_iter
         self.consistency_weight_1 = consistency_weight_1
         self.consistency_weight_2 = consistency_weight_2
         self.early_stop_max_patience = early_stop_max_patience
+        # > Loss 3: contrastive loss
         self.loss3_weight = loss3_weight
+        self.loss3_weight_rampup_interval = loss3_weight_rampup_interval
+        self.loss3_weight_rampup_iter = loss3_weight_rampup_iter
         self.use_contrastive_loss = use_contrastive_loss
         self.contrastive_dropout_rate = contrastive_dropout_rate
         self.contrastive_weight = contrastive_weight
         self.use_adv_loss = use_adv_loss
         self.adv_weight = adv_weight
         self.adv_loss_kwargs = adv_loss_kwargs
-        self.weight_rampup_length = weight_rampup_length
-        self.weight_rampup_interval = weight_rampup_interval
         # <<< Training parameters
 
         # >>> Inference parameters
@@ -655,11 +664,6 @@ class CPCSAMTrainer(BaseTrainer):
                 ce_kwargs={},
                 default_dice_weight=0.8,
             )
-            self.loss2_weight_rampup = SigmoidRampUp(
-                self.config.loss2_weight,
-                max_steps=self.config.weight_rampup_length,
-                interval=self.config.weight_rampup_interval,
-            )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
 
@@ -674,10 +678,17 @@ class CPCSAMTrainer(BaseTrainer):
         if self.config.use_adv_loss:
             self.adv_loss = VAT2d(**self.config.adv_loss_kwargs)
 
+        # Setup rampup functions for loss weights
+        self.loss2_weight_rampup = SigmoidRampUp(
+            self.config.loss2_weight,
+            max_steps=self.config.loss2_weight_rampup_iter,
+            interval=self.config.loss2_weight_rampup_interval,
+        )
+
         self.loss3_weight_rampup = SigmoidRampUp(
             self.config.loss3_weight,
-            max_steps=self.config.weight_rampup_length,
-            interval=self.config.weight_rampup_interval,
+            max_steps=self.config.loss3_weight_rampup_iter,
+            interval=self.config.loss3_weight_rampup_interval,
         )
 
     def _print_train_info(self):
@@ -743,6 +754,12 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"dice_weight: {self.config.dice_weight}")
         self.logger.info(f"loss2_weight: {self.config.loss2_weight}")
         self.logger.info(
+            f"loss2_weight_rampup_iter: {self.config.loss2_weight_rampup_iter}"
+        )
+        self.logger.info(
+            f"loss2_weight_rampup_interval: {self.config.loss2_weight_rampup_interval}"
+        )
+        self.logger.info(
             f"consistency_weight_1: {self.config.consistency_weight_1}"
         )
         self.logger.info(
@@ -752,6 +769,12 @@ class CPCSAMTrainer(BaseTrainer):
             f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
         self.logger.info(f"loss3_weight: {self.config.loss3_weight}")
+        self.logger.info(
+            f"loss3_weight_rampup_iter: {self.config.loss3_weight_rampup_iter}"
+        )
+        self.logger.info(
+            f"loss3_weight_rampup_interval: {self.config.loss3_weight_rampup_interval}"
+        )
         if self.config.use_contrastive_loss:
             self.logger.info(
                 f"contrastive_dropout_rate: {self.config.contrastive_dropout_rate}"
@@ -762,12 +785,6 @@ class CPCSAMTrainer(BaseTrainer):
 
         if self.config.use_adv_loss:
             self.logger.info(f"adv_weight: {self.config.adv_weight}")
-        self.logger.info(
-            f"weight_rampup_interval: {self.config.weight_rampup_interval}"
-        )
-        self.logger.info(
-            f"weight_rampup_length: {self.config.weight_rampup_length}"
-        )
 
         self._remove_config_file()
 
@@ -819,14 +836,11 @@ class CPCSAMTrainer(BaseTrainer):
                     f"{self.config.save_metric_name} is not a valid save metric"
                 )
 
-        default_metric = (
+        default_metric = torch.tensor(
             -torch.inf if self.config.maximum_save_metric else torch.inf
         )
         self._best_valid_metric = default_metric
         self._cur_valid_metric = default_metric
-
-        self._best_valid_prompt_metric = default_metric
-        self._cur_valid_prompt_metric = default_metric
 
         self._print_train_info()
         self._check_data_sanity()
@@ -933,43 +947,29 @@ class CPCSAMTrainer(BaseTrainer):
     def on_valid_epoch_end(self):
         metric = torch.stack(
             [o["metric"][:, :] for o in self.epoch_valid_outputs]
-        ).mean(0)
-        loss = torch.stack([o["loss"] for o in self.epoch_valid_outputs]).mean()
-        prompt_metric = torch.stack(
-            [o["prompt_metric"][:, :] for o in self.epoch_valid_outputs]
-        ).mean(0)
-        prompt_loss = torch.stack(
-            [o["prompt_loss"] for o in self.epoch_valid_outputs]
-        ).mean()
+        ).nanmean(0)
+        loss = torch.stack(
+            [o["loss"] for o in self.epoch_valid_outputs]
+        ).nanmean()
 
-        self.logger.info(f"         DSC per class: {metric[:, 0].tolist()}")
-        self.logger.info(
-            f"(prompt) DSC per class: {prompt_metric[:, 0].tolist()}"
-        )
-        self.logger.info(f"         HD per class: {metric[:, 1].tolist()}")
-        self.logger.info(
-            f"(prompt) HD per class: {prompt_metric[:, 1].tolist()}"
-        )
-        self.logger.info(f"         avg DSC: {metric[:, 0].mean().item()}")
-        self.logger.info(
-            f"(prompt) avg DSC: {prompt_metric[:, 0].mean().item()}"
-        )
-        self.logger.info(f"         avg HD: {metric[:, 1].mean().item()}")
-        self.logger.info(
-            f"(prompt) avg HD: {prompt_metric[:, 1].mean().item()}"
-        )
-        self.logger.info(f"         loss: {loss.item()}")
-        self.logger.info(f"(prompt) loss: {prompt_loss.item()}")
+        dsc_per_class = metric[:, 0]
+        avg_dsc = dsc_per_class.mean()
+
+        hd_per_class = metric[:, 1]
+        avg_hd = hd_per_class.nanmean()
+
+        self.logger.info(f"DSC per class: {dsc_per_class.tolist()}")
+        self.logger.info(f"HD per class: {hd_per_class.tolist()}")
+        self.logger.info(f"avg DSC: {avg_dsc.item()}")
+        self.logger.info(f"avg HD: {avg_hd.item()}")
+        self.logger.info(f"loss: {loss.item()}")
 
         if self.config.save_metric_name == "dice":
-            self._cur_valid_metric = metric[:, 0].mean()
-            self._cur_valid_prompt_metric = prompt_metric[:, 0].mean()
+            self._cur_valid_metric = avg_dsc
         elif self.config.save_metric_name == "hd":
-            self._cur_valid_metric = metric[:, 1].mean()
-            self._cur_valid_prompt_metric = prompt_metric[:, 1].mean()
+            self._cur_valid_metric = avg_hd
         elif self.config.save_metric_name == "loss":
             self._cur_valid_metric = loss
-            self._cur_valid_prompt_metric = prompt_loss
         else:
             raise ValueError(
                 f"{self.config.save_metric_name} is not a valid save metric"
@@ -977,28 +977,19 @@ class CPCSAMTrainer(BaseTrainer):
 
         if self.use_wandb:
             valid_metric = {
-                "valid/metric/dsc": metric[:, 0].mean().item(),
-                "valid/metric/dsc_prompt": prompt_metric[:, 0].mean().item(),
-                "valid/metric/hd95": metric[:, 1].mean().item(),
-                "valid/metric/hd95_prompt": prompt_metric[:, 1].mean().item(),
-                "valid/metric/loss": loss,
-                "valid/metric/loss_prompt": prompt_loss,
+                "valid/metric/dsc": avg_dsc.item(),
+                "valid/metric/hd95": avg_hd.item(),
+                "valid/metric/loss": loss.item(),
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
                 "valid_step": self.current_iter,
             }
             for i in range(self.config.num_classes):
-                valid_metric[f"valid/metric_per_cls/dsc/class_{i}"] = metric[
-                    i, 0
-                ].item()
-                valid_metric[f"valid/metric_per_cls/dsc_prompt/class_{i}"] = (
-                    prompt_metric[i, 0].item()
+                valid_metric[f"valid/metric_per_cls/dsc/class_{i}"] = (
+                    dsc_per_class[i].item()
                 )
-                valid_metric[f"valid/metric_per_cls/hd95/class_{i}"] = metric[
-                    i, 1
-                ].item()
-                valid_metric[f"valid/metric_per_cls/hd95_prompt/class_{i}"] = (
-                    prompt_metric[i, 1].item()
+                valid_metric[f"valid/metric_per_cls/hd95/class_{i}"] = (
+                    hd_per_class[i].item()
                 )
 
             self.wandb_runner.log(valid_metric)
@@ -1033,45 +1024,33 @@ class CPCSAMTrainer(BaseTrainer):
                 )
             is_improved = True
 
-        if self._is_improved(
-            self._best_valid_prompt_metric,
-            self._cur_valid_prompt_metric,
-            self.config.maximum_save_metric,
-        ):
-            self._best_valid_prompt_metric = self._cur_valid_prompt_metric
-            self.logger.info(
-                f"New best prompt metric ({self.config.save_metric_name}): {self._cur_valid_prompt_metric}"
-            )
-            self.save_state_dict(self.work_path / "best_model_prompt")
-
-            ckpt_path = (
-                self.work_path
-                / f"iter_{self.current_iter}_{self._best_valid_prompt_metric:.4f}_prompt"
-            )
-            self.save_state_dict(ckpt_path)
-
-            if self.use_wandb:
-                wandb.log_model(
-                    ckpt_path,
-                    name=f"best_model_prompt_{self.wandb_runner.id}",
-                    aliases=[
-                        f"iter_{self.current_iter}",
-                        f"{self.config.save_metric_name}_{self._best_valid_prompt_metric:.4f}",
-                    ],
-                )
-            is_improved = True
-
         if is_improved:
             self.current_patience = 0
+            text_lines = [
+                f"iter={self.current_iter}",
+                f"epoch={self.current_epoch})",
+                f"metric={self._best_valid_metric.item():.4f}",
+                f"dsc="
+                + "["
+                + ", ".join([f"{x:.4f}" for x in dsc_per_class.tolist()])
+                + "]",
+                f"average_dsc={avg_dsc.item():.4f}",
+                f"hd95="
+                + "["
+                + ", ".join([f"{x:.4f}" for x in hd_per_class.tolist()])
+                + "]",
+                f"average_hd95={avg_hd.item():.4f}",
+                f"loss={loss.item():.4f}",
+            ]
             self.wandb_runner.alert(
-                title="Improved performance",
-                text=f"New best performance: {self._best_valid_metric:.4f} {self._best_valid_prompt_metric:.4f} (prompt)",
+                title="Improved Performance",
+                text="; ".join(text_lines),
                 level="INFO",
             )
         else:
             self.current_patience += 1
             if self.config.early_stop_max_patience:
-                alert_threshold = self.config.early_stop_max_patience * 0.75
+                alert_threshold = self.config.early_stop_max_patience * 0.5
                 if self.current_patience >= alert_threshold:
                     self.wandb_runner.alert(
                         title="Performance Stagnation",
@@ -1353,38 +1332,12 @@ class CPCSAMTrainer(BaseTrainer):
             patch_size=[self.config.image_size, self.config.image_size],
             loss_fn=self.supervised_loss,
         )
-        prompt_metric, prompt_loss = test_single_volume_prompt(
-            image=sampled_batch["image"],
-            label=sampled_batch["label"],
-            net=self.model,
-            classes=self.config.num_classes + 1,
-            promptidx=1,
-            promptmode=self.config.promptmode,
-            patch_size=[self.config.image_size, self.config.image_size],
-            loss_fn=self.supervised_loss,
-        )
 
         self.epoch_valid_outputs.append(
             {
                 "metric": torch.Tensor(metric),
                 "loss": loss,
-                "prompt_metric": torch.Tensor(prompt_metric),
-                "prompt_loss": prompt_loss,
             }
-        )
-
-        metric = torch.stack(
-            [o["metric"] for o in self.epoch_valid_outputs]
-        ).mean(0)
-        prompt_metric = torch.stack(
-            [o["prompt_metric"] for o in self.epoch_valid_outputs]
-        ).mean(0)
-
-        self.valid_tqdm.set_postfix(
-            dict(
-                metric=metric.mean(0).tolist(),
-                prompt_metric=prompt_metric.mean(0).tolist(),
-            )
         )
 
     def train(self):
