@@ -6,6 +6,7 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.metrics import accuracy_score, precision_score, recall_score
 from tqdm import tqdm
 
 from datasets.acdc.kaggle_acdc_dataset import KaggleACDCDataset
@@ -60,36 +61,32 @@ def predict(image_tensor):
     return prediction
 
 
-def dice_coefficient(pred, target, valid_mask):
-    pred = pred[valid_mask]
-    target = target[valid_mask]
+def compute_extended_metrics(y_true, y_pred):
+    y_true_flat = y_true.flatten()
+    y_pred_flat = y_pred.flatten()
 
-    intersection = (pred == target).sum()
-    return (2. * intersection) / (pred.size + target.size)
+    dice = 2 * np.sum(y_true_flat * y_pred_flat) / (np.sum(y_true_flat) + np.sum(y_pred_flat) + 1e-6)
+    jaccard = np.sum(y_true_flat * y_pred_flat) / (
+        np.sum(y_true_flat) + np.sum(y_pred_flat) - np.sum(y_true_flat * y_pred_flat) + 1e-6)
+    precision = precision_score(y_true_flat, y_pred_flat, average='macro', zero_division=0)
+    recall = recall_score(y_true_flat, y_pred_flat, average='macro', zero_division=0)
+    accuracy = accuracy_score(y_true_flat, y_pred_flat)
 
-def iou_score(pred, target, valid_mask):
-    pred = pred[valid_mask]
-    target = target[valid_mask]
+    return dice, jaccard, precision, recall, accuracy
 
-    intersection = (pred == target).sum()
-    union = pred.size + target.size - intersection
-    return intersection / union if union != 0 else 0
 
 def test_entry() -> None:
     """Test entry point."""
-    total_correct = 0
-    total_pixels = 0
-    total_dice = 0.0
-    total_iou = 0.0
+    sum_dice = 0.0
+    sum_jaccard = 0.0
     num_slices = 0
+    sum_precision = 0.0
+    sum_recall = 0.0
+    sum_accuracy = 0.0
 
-    i = 0
     for filename in tqdm(sorted(os.listdir(TEST_DIR))):
         if not filename.endswith('.h5'):
             continue
-        i += 1
-        if i > 10:
-            break
 
         path = os.path.join(TEST_DIR, filename)
         img, lbl = load_volume(path)
@@ -101,17 +98,18 @@ def test_entry() -> None:
             pred_mask = predict(preprocess(img_slice))
 
             valid_mask = lbl_slice >= 0
-            correct = (pred_mask == lbl_slice)[valid_mask].sum()
-            total = valid_mask.sum()
 
-            total_correct += correct
-            total_pixels += total
+            dice, jaccard, precision, recall, accuracy = compute_extended_metrics(
+                lbl_slice[valid_mask], pred_mask[valid_mask]
+            )
+            sum_precision += precision
+            sum_recall += recall
+            sum_accuracy += accuracy
+            sum_dice += dice
+            sum_jaccard += jaccard
 
-            total_dice += dice_coefficient(pred_mask, lbl_slice, valid_mask)
-            total_iou += iou_score(pred_mask, lbl_slice, valid_mask)
             num_slices += 1
 
-            # Visualization
             fig, axes = plt.subplots(1, 3, figsize=(12, 4))
             axes[0].imshow(img_slice, cmap='gray')
             axes[0].set_title('Input Image')
@@ -125,13 +123,18 @@ def test_entry() -> None:
             plt.savefig(save_path)
             plt.close()
 
-    accuracy = total_correct / total_pixels
-    mean_dice = total_dice / num_slices
-    mean_iou = total_iou / num_slices
+    mean_dice = sum_dice / num_slices
+    mean_iou = sum_jaccard / num_slices
+    mean_precision = sum_precision / num_slices
+    mean_recall = sum_recall / num_slices
+    mean_accuracy = sum_accuracy / num_slices
 
-    print(f"\nOverall pixel accuracy: {accuracy:.4f}")
     print(f"Mean Dice Coefficient: {mean_dice:.4f}")
     print(f"Mean IoU Score: {mean_iou:.4f}")
+    print(f"Mean Precision: {mean_precision:.4f}")
+    print(f"Mean Recall: {mean_recall:.4f}")
+    print(f"Mean Accuracy: {mean_accuracy:.4f}")
+
 
 if __name__ == '__main__':
     test_entry()
