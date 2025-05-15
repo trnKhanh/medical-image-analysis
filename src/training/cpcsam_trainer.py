@@ -347,12 +347,12 @@ class CPCSAMTrainer(BaseTrainer):
                 config=self.config._config_dict,
             )
 
-            wandb.define_metric("train_epoch")
-            wandb.define_metric("train/epoch/*", step_metric="train_epoch")
-            wandb.define_metric("train_iter")
-            wandb.define_metric("train/iter/*", step_metric="train_iter")
-            wandb.define_metric("valid_step")
-            wandb.define_metric("valid/*", step_metric="valid_step")
+            self.wandb_runner.define_metric("train_epoch")
+            self.wandb_runner.define_metric("train/epoch/*", step_metric="train_epoch")
+            self.wandb_runner.define_metric("train_iter")
+            self.wandb_runner.define_metric("train/iter/*", step_metric="train_iter")
+            self.wandb_runner.define_metric("valid_step")
+            self.wandb_runner.define_metric("valid/*", step_metric="valid_step")
 
     def _set_seed(self, seed: int):
         os.environ["CPCSAM_SEED"] = str(seed)
@@ -374,7 +374,7 @@ class CPCSAMTrainer(BaseTrainer):
         assert self.logger is not None
 
         if not self.log_path:
-            self.log_path = self.work_path / "log.txt"
+            self.log_path = self.work_path / "log.log"
 
         self.log_path = get_path(self.log_path)
 
@@ -420,7 +420,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.config.save(config_json)
         if self.use_wandb:
-            wandb.log_artifact(
+            self.wandb_runner.log_artifact(
                 config_json,
                 name=f"config_{self.wandb_runner.id}",
                 type="config",
@@ -789,7 +789,7 @@ class CPCSAMTrainer(BaseTrainer):
         self._remove_config_file()
 
         if self.use_wandb and self.config_path:
-            wandb.log_artifact(
+            self.wandb_runner.log_artifact(
                 self.config_path,
                 name=f"config_{self.wandb_runner.id}",
                 type="config",
@@ -862,11 +862,17 @@ class CPCSAMTrainer(BaseTrainer):
         ckpt_path = self.work_path / f"ckpt/final_model"
         self.save_state_dict(ckpt_path, True)
         if self.use_wandb:
-            wandb.log_model(
+            self.wandb_runner.log_model(
                 ckpt_path,
                 name=f"model_{self.wandb_runner.id}",
                 aliases=[f"epoch_{self.current_epoch}", "final"],
             )
+            if self.log_path:
+                self.wandb_runner.log_artifact(
+                    self.log_path,
+                    name=f"log_{self.wandb_runner.id}",
+                    type="log",
+                )
 
         self.logger.info("")
         self.logger.info("")
@@ -902,7 +908,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.save_state_dict(ckpt_path, True)
 
             if self.use_wandb:
-                wandb.log_model(
+                self.wandb_runner.log_model(
                     ckpt_path,
                     name=f"model_{self.wandb_runner.id}",
                     aliases=[f"epoch_{self.current_epoch}"],
@@ -1023,7 +1029,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.save_state_dict(ckpt_path)
 
             if self.use_wandb:
-                wandb.log_model(
+                self.wandb_runner.log_model(
                     ckpt_path,
                     name=f"best_model_{self.wandb_runner.id}",
                     aliases=[
