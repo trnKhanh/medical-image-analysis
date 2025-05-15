@@ -1,10 +1,10 @@
-import sys
 import logging
+import sys
 import time
 from pathlib import Path
 
-from rich.logging import RichHandler
 from rich.console import Console
+from rich.logging import RichHandler
 
 logger = logging.getLogger("medical-images-analysis")
 

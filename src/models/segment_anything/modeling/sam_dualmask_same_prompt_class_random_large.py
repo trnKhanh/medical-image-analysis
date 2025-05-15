@@ -6,19 +6,18 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+from typing import Any, Dict, List, Tuple
 
+import cv2
+import numpy as np
 import torch
+from skimage.measure import label
 from torch import nn
 from torch.nn import functional as F
-from typing import Any, Dict, List, Tuple
 
 from .image_encoder import ImageEncoderViT
 from .mask_decoder_prompt_large import MaskDecoder_prompt_large
 from .prompt_encoder_prompt_class import PromptEncoder_prompt_class
-import numpy as np
-
-from skimage.measure import label
-import cv2
 
 
 def MaskToBoxSimple(mask):
@@ -40,10 +39,8 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         self,
         image_encoder: ImageEncoderViT,
         prompt_encoder: PromptEncoder_prompt_class,
-        mask_decoders: list[MaskDecoder_prompt_large],
-        dropout_rate: float = 0.0,
-        num_points_prompt: tuple[int, int] = (1, 2),
-        bbox_change_rate: tuple[float, float] = (0.1, 0.2),
+        mask_decoder1: MaskDecoder_prompt_large,
+        mask_decoder2: MaskDecoder_prompt_large,
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
         pixel_std: List[float] = [58.395, 57.12, 57.375],
     ) -> None:
@@ -62,56 +59,14 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         super().__init__()
         self.image_encoder = image_encoder
         self.prompt_encoder = prompt_encoder
-        self.mask_decoders = nn.ModuleList(mask_decoders)
+        self.mask_decoder1 = mask_decoder1
+        self.mask_decoder2 = mask_decoder2
         self.register_buffer(
             "pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False
         )
         self.register_buffer(
             "pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False
         )
-        self.dropout_rate = dropout_rate
-        self.feature_dropout = nn.Dropout2d(dropout_rate)
-        self.num_points_prompt = num_points_prompt
-        self.bbox_change_rate = bbox_change_rate
-
-        dim_in = self.mask_decoders[0].transformer_dim // 16  # 16
-        feat_dim = dim_in * 2  # 32
-        num_classes = self.mask_decoders[0].num_mask_tokens
-
-        self.projection_head = nn.Sequential(
-            nn.Linear(dim_in, feat_dim),
-            nn.BatchNorm1d(feat_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(feat_dim, feat_dim),
-        )
-        self.prediction_head = nn.Sequential(
-            nn.Linear(feat_dim, feat_dim),
-            nn.BatchNorm1d(feat_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(feat_dim, feat_dim),
-        )
-
-        for class_c in range(num_classes):
-            selector = nn.Sequential(
-                nn.Linear(feat_dim, feat_dim),
-                nn.BatchNorm1d(feat_dim),
-                nn.LeakyReLU(negative_slope=0.2, inplace=True),
-                nn.Linear(feat_dim, 1),
-            )
-            self.__setattr__(
-                "contrastive_class_selector_" + str(class_c), selector
-            )
-
-        for class_c in range(num_classes):
-            selector = nn.Sequential(
-                nn.Linear(feat_dim, feat_dim),
-                nn.BatchNorm1d(feat_dim),
-                nn.LeakyReLU(negative_slope=0.2, inplace=True),
-                nn.Linear(feat_dim, 1),
-            )
-            self.__setattr__(
-                "contrastive_class_selector_memory" + str(class_c), selector
-            )
 
     @property
     def device(self) -> Any:
@@ -136,7 +91,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 image_size,
                 prompt_idx,
                 prompt_mode,
-                image_embeddings,
+                image_embeddings
             )
         return outputs
 
@@ -214,23 +169,19 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         return image_embeddings
 
     def forward_train(
-        self,
-        batched_input,
-        multimask_output,
-        image_size,
-        prompt_idx,
-        prompt,
-        image_embeddings=None,
+        self, batched_input, multimask_output, image_size, prompt_idx, prompt, image_embeddings=None
     ):
         if image_embeddings is None:
             image_embeddings = self.get_image_embeddings(batched_input)
+
+        feature_dropout_rate = 0.0
 
         if prompt_idx >= 0:
             prompt_iter = itertools.cycle(prompt)
             for i in range(prompt_idx + 1):
                 prompt = next(prompt_iter)
 
-        if prompt_idx >= 0:
+        if prompt_idx == 0:
             with torch.no_grad():
                 sparse_embeddings, dense_embeddings = self.prompt_encoder(
                     points=None, boxes=None, masks=None
@@ -238,86 +189,25 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
 
                 sparse_embeddings = sparse_embeddings.detach()
                 dense_embeddings = dense_embeddings.detach()
-        else:
-            sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=None, boxes=None, masks=None
+
+            low_res_masks1, iou_predictions1, _ = self.mask_decoder1(
+                image_embeddings=image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
             )
 
-        if self.dropout_rate > 0:
-            dropout_image_embeddings = self.feature_dropout(image_embeddings)
-        else:
-            dropout_image_embeddings = image_embeddings
-
-        low_res_logits = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-        iou_predictions = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-        dense_features = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-
-        low_res_logits_r = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-        iou_predictions_r = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-        dense_features_r = [
-            torch.zeros(1) for _ in range(len(self.mask_decoders))
-        ]
-
-        assemble_low_res_logits = torch.zeros(1, device=self.device)
-
-        for id, mask_decoder in enumerate(self.mask_decoders):
-            if id == prompt_idx:
-                continue
-
-            low_res_logits[id], iou_predictions[id], dense_features[id] = (
-                mask_decoder(
-                    image_embeddings=dropout_image_embeddings,
-                    image_pe=self.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=multimask_output,
-                )
-            )
-            
-            # Obtain the pseudo labels used for generating prompts
-            with torch.no_grad():
-                if self.dropout_rate > 0:
-                    # If dropout_rate > 0, pass the raw image_embeddings
-                    raw_low_res_logit, _, _ = mask_decoder(
-                        image_embeddings=image_embeddings,
-                        image_pe=self.prompt_encoder.get_dense_pe(),
-                        sparse_prompt_embeddings=sparse_embeddings,
-                        dense_prompt_embeddings=dense_embeddings,
-                        multimask_output=multimask_output,
-                    )
-
-                    assemble_low_res_logits = (
-                        assemble_low_res_logits + raw_low_res_logit.softmax(1)
-                    )
-                else:
-                    assemble_low_res_logits = (
-                        assemble_low_res_logits + low_res_logits[id].softmax(1)
-                    )
-
-        assemble_low_res_logits /= len(self.mask_decoders) - 1
-
-        if prompt_idx >= 0 and prompt_idx < len(self.mask_decoders):
+            # Get prompt embedding based on prompt generation scheme
             sparse_embeddings, sparse_embeddings_r, dense_embeddings = (
-                self._get_prompt_embeddings(
-                    assemble_low_res_logits, image_size, prompt
-                )
+                self._get_prompt_embeddings(low_res_masks1, image_size, prompt)
             )
 
-            (
-                low_res_logits[prompt_idx],
-                iou_predictions[prompt_idx],
-                dense_features[prompt_idx],
-            ) = self.mask_decoders[prompt_idx](
+            dropout_image_embeddings = F.dropout(
+                image_embeddings, feature_dropout_rate, self.training
+            )
+
+            low_res_masks2, iou_predictions2, _ = self.mask_decoder2(
                 image_embeddings=dropout_image_embeddings,
                 image_pe=self.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
@@ -325,11 +215,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 multimask_output=multimask_output,
             )
 
-            (
-                low_res_logits_r[prompt_idx],
-                iou_predictions_r[prompt_idx],
-                dense_features_r[prompt_idx],
-            ) = self.mask_decoders[prompt_idx](
+            low_res_masks2_r, iou_predictions2_r, _ = self.mask_decoder2(
                 image_embeddings=dropout_image_embeddings,
                 image_pe=self.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings_r,
@@ -337,26 +223,110 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 multimask_output=multimask_output,
             )
 
-        masks = [torch.zeros(1) for _ in range(len(self.mask_decoders))]
+        elif prompt_idx == 1:
+            with torch.no_grad():
+                sparse_embeddings, dense_embeddings = self.prompt_encoder(
+                    points=None, boxes=None, masks=None
+                )
 
-        for id in range(len(self.mask_decoders)):
-            assert isinstance(low_res_logits[id], torch.Tensor)
+                sparse_embeddings = sparse_embeddings.detach()
+                dense_embeddings = dense_embeddings.detach()
 
-            masks[id] = self.postprocess_masks(
-                low_res_logits[id],
-                input_size=(image_size, image_size),
-                original_size=(image_size, image_size),
+            low_res_masks2, iou_predictions2, _ = self.mask_decoder2(
+                image_embeddings=image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
             )
 
-        outputs = {
-            "masks": masks,
-            "iou_predictions": iou_predictions,
-            "low_res_logits": low_res_logits,
-            "low_res_logits_r": low_res_logits_r,
-            "dense_features": dense_features,
-            "dense_features_r": dense_features_r,
-        }
+            # Get prompt embedding based on prompt generation scheme
+            sparse_embeddings, sparse_embeddings_r, dense_embeddings = (
+                self._get_prompt_embeddings(low_res_masks2, image_size, prompt)
+            )
 
+            dropout_image_embeddings = F.dropout(
+                image_embeddings, feature_dropout_rate, self.training
+            )
+
+            low_res_masks1, iou_predictions1, _ = self.mask_decoder1(
+                image_embeddings=dropout_image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
+            )
+
+            low_res_masks1_r, iou_predictions1_r, _ = self.mask_decoder1(
+                image_embeddings=dropout_image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings_r,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
+            )
+
+        else:
+            sparse_embeddings, dense_embeddings = self.prompt_encoder(
+                points=None, boxes=None, masks=None
+            )
+
+            low_res_masks1, iou_predictions1, _ = self.mask_decoder1(
+                image_embeddings=image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
+            )
+
+            low_res_masks2, iou_predictions2, _ = self.mask_decoder2(
+                image_embeddings=image_embeddings,
+                image_pe=self.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
+            )
+
+        masks1 = self.postprocess_masks(
+            low_res_masks1,
+            input_size=(image_size, image_size),
+            original_size=(image_size, image_size),
+        )
+        masks2 = self.postprocess_masks(
+            low_res_masks2,
+            input_size=(image_size, image_size),
+            original_size=(image_size, image_size),
+        )
+
+        if prompt_idx != -1:
+            if prompt_idx == 1:
+                outputs = {
+                    "masks": masks1,
+                    "iou_predictions1": iou_predictions1,
+                    "low_res_logits1": low_res_masks1,
+                    "low_res_logits1_r": low_res_masks1_r,
+                    "masks2": masks2,
+                    "iou_predictions2": iou_predictions2,
+                    "low_res_logits2": low_res_masks2,
+                }
+            else:
+                outputs = {
+                    "masks": masks1,
+                    "iou_predictions1": iou_predictions1,
+                    "low_res_logits1": low_res_masks1,
+                    "masks2": masks2,
+                    "iou_predictions2": iou_predictions2,
+                    "low_res_logits2": low_res_masks2,
+                    "low_res_logits2_r": low_res_masks2_r,
+                }
+        else:
+            outputs = {
+                "masks": masks1,
+                "iou_predictions1": iou_predictions1,
+                "low_res_logits1": low_res_masks1,
+                "masks2": masks2,
+                "iou_predictions2": iou_predictions2,
+                "low_res_logits2": low_res_masks2,
+            }
         return outputs
 
     @torch.no_grad()
@@ -522,9 +492,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         # points_prompt = np.zeros([b, num_class, 2])
         # points_label = np.zeros([b, num_class])
         # points_prompt_random = np.zeros([b, num_class, 2])
-        num_points = np.random.randint(
-            self.num_points_prompt[0], self.num_points_prompt[1] + 1, num_class
-        )
+        num_points = np.random.randint(1, 3, num_class)
         cum_num_points = np.concatenate(
             [np.zeros(1, dtype=np.int64), np.cumsum(num_points)]
         )
@@ -537,7 +505,6 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         boxes_label = np.zeros([b, num_class - 1])
 
         from datetime import datetime
-
         st_time = datetime.now()
         for idx in range(b):  # iterate over each image
             for cls in range(num_class):  # find points for each class
@@ -545,10 +512,12 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 # obtain the binary mask
                 mask_cls = (coarse_mask_np[idx] == cls).astype(np.uint8)
                 if mask_cls.max() > 0:
-                    region_mask = np.array(label(mask_cls, connectivity=2))
-                    region_ids, region_sizes = np.unique(
-                        region_mask, return_counts=True
+                    region_mask, num_regions = label(
+                        mask_cls, connectivity=2, return_num=True
                     )
+                    ratio_list, region_id_list = [], []
+                    region_size_list = []
+                    region_ids, region_sizes = np.unique(region_mask, return_counts=True)
                     if region_ids[0] == 0:
                         region_ids = region_ids[1:]
                         region_sizes = region_sizes[1:]
@@ -595,10 +564,10 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                         points_label[idx, cls_slice] = cls
 
                         fit_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, self.bbox_change_rate[0]
+                            binary_msk, 0.1
                         )
                         loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, self.bbox_change_rate[1]
+                            binary_msk, 0.3
                         )
                 else:
                     (

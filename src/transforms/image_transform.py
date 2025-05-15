@@ -1,15 +1,14 @@
 import json
-from typing import Sequence, Tuple
 import math
+from typing import Sequence, Tuple
 
 import torch
+import torchvision.transforms.functional as F
+from PIL import Image
 from torch.nn.functional import interpolate
 from torchvision import transforms as T
-import torchvision.transforms.functional as F
 
-from PIL import Image
-
-from .common import image_to_tensor, BaseTransform
+from .common import BaseTransform, image_to_tensor
 
 
 class RandomGamma(BaseTransform):

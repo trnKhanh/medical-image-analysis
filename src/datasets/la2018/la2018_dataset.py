@@ -1,21 +1,17 @@
 import json
-from typing import Callable, Literal
 from logging import Logger
 from pathlib import Path
+from typing import Callable, Literal
 
 import numpy as np
 import torch
 import torchvision.transforms.functional as F
 
 from datasets import BaseDataset
-from datasets.utils.logging import (
-    log_no_split_dict,
-    log_not_found_split_dict,
-    log_not_found_split_dict_key,
-    log_not_found_label,
-)
 from datasets.utils.exceptions import SplitDictKeyException
-
+from datasets.utils.logging import (log_no_split_dict, log_not_found_label,
+                                    log_not_found_split_dict,
+                                    log_not_found_split_dict_key)
 from utils import get_path
 from utils.images import read_nrrd
 

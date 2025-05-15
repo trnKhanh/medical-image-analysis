@@ -1,10 +1,11 @@
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 
 from PIL import Image
 
-from .basecommand import BaseCommand
 from utils.logging import logger
+
+from .basecommand import BaseCommand
 
 
 class VisualizeCommand(BaseCommand):

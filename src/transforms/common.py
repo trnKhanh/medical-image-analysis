@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
 import json
+from abc import ABC, abstractmethod
 from typing import Callable
 
+import numpy as np
 import torch
 import torchvision.transforms.functional as F
-
-import numpy as np
 from PIL import Image
 
 

@@ -1,10 +1,11 @@
-from . import sam_model_registry
+import math
 from typing import Any
 
-import math
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
+
+from . import sam_model_registry
 from .modeling import Sam
 
 
@@ -17,12 +18,12 @@ class _LoRA_qkv(nn.Module):
     """
 
     def __init__(
-        self,
-        qkv: nn.Module,
-        linear_a_q: nn.Module,
-        linear_b_q: nn.Module,
-        linear_a_v: nn.Module,
-        linear_b_v: nn.Module,
+            self,
+            qkv: nn.Module,
+            linear_a_q: nn.Module,
+            linear_b_q: nn.Module,
+            linear_a_v: nn.Module,
+            linear_b_v: nn.Module,
     ):
         super().__init__()
         self.qkv = qkv
@@ -38,7 +39,7 @@ class _LoRA_qkv(nn.Module):
         new_q = self.linear_b_q(self.linear_a_q(x))
         new_v = self.linear_b_v(self.linear_a_v(x))
         qkv[:, :, :, : self.dim] += new_q
-        qkv[:, :, :, -self.dim :] += new_v
+        qkv[:, :, :, -self.dim:] += new_v
         return qkv
 
 
@@ -69,8 +70,7 @@ class LoRA_Sam(nn.Module):
             self.lora_layer = lora_layer
         else:
             self.lora_layer = list(
-                range(len(sam_model.image_encoder.blocks))
-            )  # Only apply lora to the image encoder by default
+                range(len(sam_model.image_encoder.blocks)))  # Only apply lora to the image encoder by default
         # create for storage, then we can init them or load weights
         self.w_As = []  # These are linear layers
         self.w_Bs = []
@@ -112,41 +112,26 @@ class LoRA_Sam(nn.Module):
         save both lora and fc parameters.
         """
 
-        assert filename.endswith(".pt") or filename.endswith(".pth")
+        assert filename.endswith(".pt") or filename.endswith('.pth')
 
         num_layer = len(self.w_As)  # actually, it is half
-        a_tensors = {
-            f"w_a_{i:03d}": self.w_As[i].weight for i in range(num_layer)
-        }
-        b_tensors = {
-            f"w_b_{i:03d}": self.w_Bs[i].weight for i in range(num_layer)
-        }
+        a_tensors = {f"w_a_{i:03d}": self.w_As[i].weight for i in range(num_layer)}
+        b_tensors = {f"w_b_{i:03d}": self.w_Bs[i].weight for i in range(num_layer)}
         prompt_encoder_tensors = {}
         mask_decoder_tensors = {}
-        misc_params_tensors = {}
 
         # save prompt encoder, only `state_dict`, the `named_parameter` is not permitted
-        if isinstance(self.sam, torch.nn.DataParallel) or isinstance(
-            self.sam, torch.nn.parallel.DistributedDataParallel
-        ):
+        if isinstance(self.sam, torch.nn.DataParallel) or isinstance(self.sam, torch.nn.parallel.DistributedDataParallel):
             state_dict = self.sam.module.state_dict()
         else:
             state_dict = self.sam.state_dict()
         for key, value in state_dict.items():
-            if "prompt_encoder" in key:
+            if 'prompt_encoder' in key:
                 prompt_encoder_tensors[key] = value
-            elif "mask_decoder" in key:
+            if 'mask_decoder' in key:
                 mask_decoder_tensors[key] = value
-            elif "image_encoder" not in key:
-                misc_params_tensors[key] = value
 
-        merged_dict = {
-            **a_tensors,
-            **b_tensors,
-            **prompt_encoder_tensors,
-            **mask_decoder_tensors,
-            **misc_params_tensors,
-        }
+        merged_dict = {**a_tensors, **b_tensors, **prompt_encoder_tensors, **mask_decoder_tensors}
         torch.save(merged_dict, filename)
 
     def load_lora_parameters(self, filename: str) -> None:
@@ -157,9 +142,9 @@ class LoRA_Sam(nn.Module):
         load both lora and fc parameters.
         """
 
-        assert filename.endswith(".pt") or filename.endswith(".pth")
+        assert filename.endswith(".pt") or filename.endswith('.pth')
 
-        state_dict = torch.load(filename, weights_only=True, map_location="cpu")
+        state_dict = torch.load(filename, weights_only=True)
 
         for i, w_A_linear in enumerate(self.w_As):
             saved_key = f"w_a_{i:03d}"
@@ -175,35 +160,16 @@ class LoRA_Sam(nn.Module):
         sam_keys = sam_dict.keys()
 
         # load prompt encoder
-        prompt_encoder_keys = [k for k in sam_keys if "prompt_encoder" in k]
+        prompt_encoder_keys = [k for k in sam_keys if 'prompt_encoder' in k]
         prompt_encoder_values = [state_dict[k] for k in prompt_encoder_keys]
-        prompt_encoder_new_state_dict = {
-            k: v for k, v in zip(prompt_encoder_keys, prompt_encoder_values)
-        }
+        prompt_encoder_new_state_dict = {k: v for k, v in zip(prompt_encoder_keys, prompt_encoder_values)}
         sam_dict.update(prompt_encoder_new_state_dict)
 
         # load mask decoder
-        mask_decoder_keys = [k for k in sam_keys if "mask_decoder" in k]
+        mask_decoder_keys = [k for k in sam_keys if 'mask_decoder' in k]
         mask_decoder_values = [state_dict[k] for k in mask_decoder_keys]
-        mask_decoder_new_state_dict = {
-            k: v for k, v in zip(mask_decoder_keys, mask_decoder_values)
-        }
+        mask_decoder_new_state_dict = {k: v for k, v in zip(mask_decoder_keys, mask_decoder_values)}
         sam_dict.update(mask_decoder_new_state_dict)
-
-        # load misc parameters
-        misc_params_keys = [
-            k
-            for k in sam_keys
-            if "image_encoder" not in k
-            and k not in mask_decoder_keys
-            and k not in prompt_encoder_keys
-        ]
-        misc_params_values = [state_dict[k] for k in misc_params_keys]
-        misc_params_new_state_dict = {
-            k: v for k, v in zip(misc_params_keys, misc_params_values)
-        }
-        sam_dict.update(misc_params_new_state_dict)
-
         self.sam.load_state_dict(sam_dict)
 
     def reset_parameters(self) -> None:
@@ -212,27 +178,13 @@ class LoRA_Sam(nn.Module):
         for w_B in self.w_Bs:
             nn.init.zeros_(w_B.weight)
 
-    def forward(
-        self,
-        batched_input,
-        multimask_output,
-        image_size,
-        prompt_idx=-1,
-        prompt_mode=None,
-        image_embeddings=None,
-    ):
-        return self.sam(
-            batched_input,
-            multimask_output,
-            image_size,
-            prompt_idx,
-            prompt_mode,
-            image_embeddings,
-        )
+    def forward(self, batched_input, multimask_output, image_size, prompt_idx = -1, prompt_mode = None, image_embeddings=None):
+        return self.sam(batched_input, multimask_output, image_size, prompt_idx, prompt_mode, image_embeddings)
 
     @property
     def device(self) -> Any:
         return self.sam.device
+
 
     # def forward(self, x: Tensor) -> Tensor:
     #     return self.lora_vit(x)
@@ -242,3 +194,4 @@ if __name__ == "__main__":
     sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b_01ec64.pth")
     lora_sam = LoRA_Sam(sam, 4)
     lora_sam.sam.image_encoder(torch.rand(size=(1, 3, 1024, 1024)))
+

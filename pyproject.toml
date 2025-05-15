@@ -15,21 +15,22 @@ keywords = []
 classifiers = []
 requires-python = ">=3.10"
 dependencies = [
-  "torch",
-  "torchvision",
-  "wandb",
+  "torch~=2.7.0",
+  "torchvision~=0.22.0",
   "numpy<2",
-  "monai", 
-  "rich",
-  "pillow",
-  "tqdm",
-  "rich",
-  "opencv-python",
-  "nnunetv2",
+  "monai~=1.4.0",
+  "rich~=14.0.0",
+  "pillow~=11.2.1",
+  "tqdm~=4.67.1",
+  "opencv-python~=4.11.0.86",
+  "nnunetv2~=2.6.0",
   "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
-  "SimpleITK",
-  "h5py",
-  "medpy",
+  "SimpleITK~=2.5.0",
+  "medpy~=0.5.2",
+  "isort~=6.0.1",
+  "label-studio-converter~=0.0.59",
+  "h5py~=3.13.0",
+  "toml~=0.10.2"
 ]
 dynamic = ["version"]
 
@@ -46,6 +47,9 @@ fugc2025_mask2rle = "entry.fugc2025.preprocess.mask2rle:mask2rle_entry"
 fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
 
 cpcsam_train = "entry.cpcsam.train:train_entry"
+
+active-learning-train = "entry.active_learning.train:train_entry"
+active-learning-test = "entry.active_learning.test:main"
 
 [tool.setuptools_scm]
 

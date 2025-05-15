@@ -1,13 +1,14 @@
 import json
-from collections import deque
 from argparse import ArgumentParser
+from collections import deque
 from pathlib import Path
 
-from label_studio_converter.brush import decode_rle
 import numpy as np
+from label_studio_converter.brush import decode_rle
 from PIL import Image
 
 from utils import draw_mask
+
 
 def parse_args():
     parser = ArgumentParser()

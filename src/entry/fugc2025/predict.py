@@ -1,16 +1,17 @@
 import os
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 
 import cv2
+import numpy as np
 import torch
 import torchvision.transforms.functional as F
 from PIL import Image
-import numpy as np
 from tqdm import tqdm
+
 from models.unet import UNet
-from utils.utils import draw_mask
 from transforms.normalization import ZScoreNormalize
+from utils.utils import draw_mask
 
 
 class model:

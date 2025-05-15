@@ -1,12 +1,12 @@
-from typing import Tuple, List, Sequence
+from typing import List, Sequence, Tuple
 
 import torch
+from PIL import Image
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
 
-from PIL import Image
+from .common import BaseTransform, image_to_tensor
 
-from .common import image_to_tensor, BaseTransform
 
 class JointResize(BaseTransform):
     def __init__(self, image_size: Tuple[int, int] | int):

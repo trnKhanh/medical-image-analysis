@@ -1,5 +1,6 @@
 from logging import Logger
 
+
 def log_no_split_dict(logger: Logger):
     message = f"No split_dict is specified"
     logger.warn(message)

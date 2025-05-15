@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from torch.utils.data import Dataset
 from monai.transforms.transform import Transform
+from torch.utils.data import Dataset
 
 
 class BTCVDataset(Dataset):

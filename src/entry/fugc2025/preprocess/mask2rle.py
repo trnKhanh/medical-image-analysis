@@ -1,10 +1,10 @@
-import uuid
 import json
-from pathlib import Path
+import uuid
 from argparse import ArgumentParser
+from pathlib import Path
 
-from label_studio_converter.brush import mask2rle
 import numpy as np
+from label_studio_converter.brush import mask2rle
 from PIL import Image
 
 

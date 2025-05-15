@@ -1,21 +1,18 @@
-from copy import deepcopy
-from typing import Callable, Dict, List, Literal
-from pathlib import Path
-from logging import Logger
 import json
+from copy import deepcopy
+from logging import Logger
+from pathlib import Path
+from typing import Callable, Dict, List, Literal
 
 import torch
 import torchvision.transforms.functional as F
 from PIL import Image
 
 from datasets.basedataset import BaseDataset
-from datasets.utils.logging import (
-    log_no_split_dict,
-    log_not_found_split_dict,
-    log_not_found_split_dict_key,
-    log_not_found_label,
-)
 from datasets.utils.exceptions import SplitDictKeyException
+from datasets.utils.logging import (log_no_split_dict, log_not_found_label,
+                                    log_not_found_split_dict,
+                                    log_not_found_split_dict_key)
 from utils import get_path
 
 

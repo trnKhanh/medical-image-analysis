@@ -1,8 +1,9 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-from . import commands
 from utils.logging import logger, setup_logger
+
+from . import commands
 
 
 def setup_parser():

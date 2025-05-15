@@ -1,9 +1,10 @@
 from typing import Callable
 
 import torch
-from .dice_loss import MemoryEfficientSoftDiceLoss, DiceLoss
-from .ce_loss import RobustCrossEntropyLoss, TopKLoss
 from torch import nn
+
+from .dice import DiceLoss, MemoryEfficientSoftDiceLoss
+from .robust_ce_loss import RobustCrossEntropyLoss, TopKLoss
 
 
 def softmax_helper_dim0(x: torch.Tensor) -> torch.Tensor:

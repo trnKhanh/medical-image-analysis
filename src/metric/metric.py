@@ -1,9 +1,7 @@
+import numpy as np
 import SimpleITK as sitk
-
 import torch
 from torch import nn
-
-import numpy as np
 
 
 class HD(nn.Module):
