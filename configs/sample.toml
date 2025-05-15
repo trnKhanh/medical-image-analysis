@@ -1,0 +1,11 @@
+
+[datasets.acdc]
+path="resources/ACDC_preprocessed/"
+train=""
+test=""
+
+[train.active_learning]
+checkpoints = "resources/active_learning/checkpoints"
+
+[test.active_learning]
+output = "resources/active_learning/test_outputs"
