@@ -256,6 +256,7 @@ class CPCSAMTrainer(BaseTrainer):
         self,
         work_path: Path | str = Path.cwd(),
         device: torch.device | str = torch.device("cuda"),
+        deterministic: bool = True,
         config: CPCSAMConfig | dict | str | Path | None = None,
         # Log parameters
         verbose: bool = True,
@@ -278,6 +279,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.work_path = get_path(work_path)
         self.device = torch.device("cpu")
+        self.deterministic = deterministic
         self.to(device)
 
         self._set_seed(self.config.seed)
@@ -295,6 +297,13 @@ class CPCSAMTrainer(BaseTrainer):
         # <<< Log parameters
 
     def initialize(self):
+        if self.deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+        else:
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+
         self._set_snapshot_work_dir()
         self._setup_wandb()
         self._setup_logger()
@@ -348,9 +357,13 @@ class CPCSAMTrainer(BaseTrainer):
             )
 
             self.wandb_runner.define_metric("train_epoch")
-            self.wandb_runner.define_metric("train/epoch/*", step_metric="train_epoch")
+            self.wandb_runner.define_metric(
+                "train/epoch/*", step_metric="train_epoch"
+            )
             self.wandb_runner.define_metric("train_iter")
-            self.wandb_runner.define_metric("train/iter/*", step_metric="train_iter")
+            self.wandb_runner.define_metric(
+                "train/iter/*", step_metric="train_iter"
+            )
             self.wandb_runner.define_metric("valid_step")
             self.wandb_runner.define_metric("valid/*", step_metric="valid_step")
 
