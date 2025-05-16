@@ -18,15 +18,21 @@ with open("configs/development.toml", "rb") as f:
 # ========== CONFIG ==========
 ROUND = 5
 TEST_DIR = CONFIG["datasets"]["acdc"]["test"]
+TRAIN_DIR = CONFIG["datasets"]["acdc"]["train"]
 CHECKPOINT_PATH = f'{CONFIG["train"]["active_learning"]["checkpoints"]}/unet_round_{ROUND}.pth'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 OUTPUT_DIR = f"{CONFIG["test"]["active_learning"]["output"]}/round_{ROUND}"
 
 
+def get_num_classes(filepath) -> int:
+    data = KaggleACDCDataset.load(filepath, is_training=True, target_size=(256, 256))
+    num_classes = np.max(data['masks']) + 1
+    return num_classes
+
 # ========== LOAD MODEL ==========
-model = UNet(n_channels=1)
-model.init_head(4)
-model.load_state_dict(torch.load(CHECKPOINT_PATH))
+model = UNet(n_channels=1, n_classes=get_num_classes(TRAIN_DIR))
+state = torch.load(CHECKPOINT_PATH, weights_only=False)
+model.load_state_dict(state["model_state"])
 model.to(DEVICE)
 model.eval()
 
@@ -40,7 +46,6 @@ def load_volume(filepath):
         image = f['image'][:]
         label = f['label'][:]
     return image, label
-
 
 def preprocess(image):
     image = image.astype(np.float32)

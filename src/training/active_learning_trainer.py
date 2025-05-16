@@ -166,7 +166,7 @@ class ActiveLearningTrainer(BaseTrainer):
         self.perform_real_test()
 
     def perform_real_test(self):
-        # Optional implementation placeholder
+        # TODO: Integrate later
         pass
 
     def state_dict(self):
@@ -182,7 +182,7 @@ class ActiveLearningTrainer(BaseTrainer):
 
     def load_state_dict(self, save_path: str | Path):
         state = torch.load(save_path)
-        self.model = UNet(n_channels=3, n_classes=np.max(self.y_train) + 1).to(self.device)
+        self.model = UNet(n_channels=1, n_classes=np.max(self.y_train) + 1).to(self.device)
         self.model.load_state_dict(state["model_state"])
         self.labeled_indices = state["labeled_indices"]
         self.unlabeled_indices = state["unlabeled_indices"]
