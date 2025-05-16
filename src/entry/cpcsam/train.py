@@ -8,6 +8,7 @@ def parse_args():
 
     parser.add_argument("--work-path", default=".", type=str)
     parser.add_argument("--device", default="cuda", type=str)
+    parser.add_argument("--no-deterministic", dest="deterministic",action="store_false")
     parser.add_argument("--seed", default=1337, type=int)
     parser.add_argument("--test-only", action="store_true")
 
