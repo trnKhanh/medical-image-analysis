@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--budget", default=10, type=int)
     parser.add_argument("--active-selector", default="random", type=str)
     parser.add_argument("--optimizer", default="adam", type=str)
+    parser.add_argument("--weight-decay", default=5e-4, type=float)
     parser.add_argument("--num-iters", default=4000, type=int)
     parser.add_argument("--start-lr", default=1e-3, type=int)
     parser.add_argument("--lr-scheduler", default="poly", type=str)
@@ -69,13 +70,14 @@ def train_entry():
     args_dict = vars(args)
     test_only = args_dict.pop("test_only")
     optimizer = args_dict.pop("optimizer")
+    weight_decay = args_dict.pop("weight_decay")
     lr_scheduler = args_dict.pop("lr_scheduler")
     loss = args_dict.pop("loss")
     save_metric = args_dict.pop("save_metric")
     active_selector = args_dict.pop("active_selector")
 
     args_dict["optimizer_name"] = optimizer
-    args_dict["optimizer_kwargs"] = {}
+    args_dict["optimizer_kwargs"] = {"weight_decay": weight_decay}
     args_dict["lr_scheduler_name"] = lr_scheduler
     args_dict["loss_name"] = loss
     args_dict["save_metric_name"] = save_metric

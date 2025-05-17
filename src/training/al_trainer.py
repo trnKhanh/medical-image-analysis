@@ -568,21 +568,18 @@ class ALTrainer(BaseTrainer):
             optimizer = torch.optim.Adam(
                 parameters,
                 betas=(0.9, 0.999),
-                weight_decay=0.001,
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "adamw":
             optimizer = torch.optim.AdamW(
                 parameters,
                 betas=(0.9, 0.999),
-                weight_decay=0.1,
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "sgd":
             optimizer = torch.optim.SGD(
                 parameters,
                 momentum=0.9,
-                weight_decay=0.001,
                 **self.config.optimizer_kwargs,
             )
         else:
@@ -1335,16 +1332,30 @@ class ALTrainer(BaseTrainer):
                 {f"test_performance_round_{self.current_round}": wandb_table}
             )
 
-        avg_metric = metric_tensor.mean(0)
+        avg_metric_per_cls = metric_tensor.mean(0)
         self.logger.info("Real test results:")
         for id in classes.keys():
             if id == 0:
                 continue
 
-            self.logger.info(f"  {classes[id]}: {avg_metric[id-1].tolist()}")
+            self.logger.info(f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}")
 
-        self.logger.info(f"Average: {avg_metric.mean(0).tolist()}")
+        self.logger.info(f"Average: {avg_metric_per_cls.mean(0).tolist()}")
 
+        if self.use_wandb:
+            avg_metric = avg_metric_per_cls.mean(0)
+            avg_dsc = avg_metric[0]
+            avg_hd = avg_metric[1]
+            avg_asd = avg_metric[2]
+            avg_jc = avg_metric[3]
+            test_metric = {
+                f"test/metric/dsc": avg_dsc.item(),
+                f"test/metric/hd95": avg_hd.item(),
+                f"test/valid/metric/asd": avg_asd.item(),
+                f"test/valid/metric/jc": avg_jc.item(),
+                f"round_step": self.current_round
+            }
+            self.wandb_runner.log(test_metric)
         # save:
         write_csv = self.work_path / f"test_mean_round_{self.current_round}.csv"
         save = pd.DataFrame(dataframe_dict)
