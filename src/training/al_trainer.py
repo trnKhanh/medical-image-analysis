@@ -393,7 +393,7 @@ class ALTrainer(BaseTrainer):
 
         self.config.save(config_json)
         if self.use_wandb:
-            wandb.log_artifact(
+            self.wandb_runner.log_artifact(
                 config_json,
                 name=f"config_{self.wandb_runner.id}",
                 type="config",
@@ -767,6 +767,12 @@ class ALTrainer(BaseTrainer):
         )
         self.active_dataset.extend_train_set(new_samples)
         self.active_dataset.save_data_list(data_list_path)
+        if self.use_wandb:
+            self.wandb_runner.log_artifact(
+                data_list_path,
+                name=f"data_list_{self.wandb_runner.id}_round_{self.current_round}",
+                type="data_list",
+            )
 
         self.train_dataloader = self.get_train_dataloader(self.active_dataset)
 
@@ -972,7 +978,7 @@ class ALTrainer(BaseTrainer):
             self.save_state_dict(ckpt_path)
 
             if self.use_wandb:
-                wandb.log_model(
+                self.wandb_runner.log_model(
                     ckpt_path,
                     name=f"best_model_{self.wandb_runner.id}_round_{self.current_round}",
                     aliases=[
