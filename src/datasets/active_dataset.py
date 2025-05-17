@@ -47,7 +47,7 @@ class ActiveDataset:
         return self.labeled_dataset
 
     def get_pool_dataset(self):
-        return self.get_pool_dataset
+        return self.pool_dataset
 
     def get_size(self):
         return len(self.labeled_dataset), len(self.pool_dataset)

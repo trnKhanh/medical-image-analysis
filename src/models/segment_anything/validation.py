@@ -468,7 +468,6 @@ def test_single_volume_mean(
     case_raw = data_path / f"ACDC_raw/{case}.nii.gz"
     case_raw = sitk.ReadImage(case_raw)
     raw_spacing = case_raw.GetSpacing()
-    print(raw_spacing)
     raw_spacing_new = []
     raw_spacing_new.append(raw_spacing[2])
     raw_spacing_new.append(raw_spacing[1])

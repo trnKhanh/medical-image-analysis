@@ -64,7 +64,7 @@ from transforms.common import (
     RandomChoiceTransform,
 )
 
-from activelearning import ActiveSelector, RandomSelector
+from activelearning import ActiveSelector, RandomSelector, EntropySelector
 
 
 class ALConfig(object):
@@ -103,7 +103,7 @@ class ALConfig(object):
         # Training parameters
         num_rounds: int = 5,
         budget: int = 10,
-        active_selector_name: Literal["random"] = "random",
+        active_selector_name: Literal["random", "entropy"] = "random",
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
@@ -622,9 +622,15 @@ class ALTrainer(BaseTrainer):
     def _setup_active_selector(self):
         if self.config.active_selector_name == "random":
             self.active_selector = RandomSelector()
+        elif self.config.active_selector_name == "entropy":
+            self.active_selector = EntropySelector(
+                self.config.batch_size,
+                self.config.num_workers,
+                self.config.pin_memory,
+            )
         else:
             raise ValueError(
-                f"ActiveSelector {self.config.loss_name} not found"
+                f"ActiveSelector {self.config.active_selector_name} not found"
             )
 
     def _print_train_info(self):
@@ -762,7 +768,7 @@ class ALTrainer(BaseTrainer):
         )
 
         new_samples = self.active_selector.select_next_batch(
-            self.active_dataset, self.config.budget, self.model
+            self.active_dataset, self.config.budget, self.model, self.device
         )
         self.active_dataset.extend_train_set(new_samples)
         self.active_dataset.save_data_list(data_list_path)
@@ -867,7 +873,7 @@ class ALTrainer(BaseTrainer):
 
         if self.use_wandb:
             train_metric = {
-                f"round_{self.current_round}/train/epoch/losses/loss": train_loss,
+                f"round_{self.current_round}/train/epoch/loss": train_loss,
                 f"round_{self.current_round}_train_epoch": self.current_epoch,
                 f"round_{self.current_round}_train_iter": self.current_iter,
             }
@@ -1048,7 +1054,6 @@ class ALTrainer(BaseTrainer):
             self.device
         )
 
-        self.optimizer.zero_grad()
 
         with (
             torch.autocast(self.device.type, enabled=True)
@@ -1058,11 +1063,11 @@ class ALTrainer(BaseTrainer):
             output = self.model(image_batch)
             loss, _, _ = self.supervised_loss(output, label_batch)
 
+        self.optimizer.zero_grad()
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.config.grad_norm
         )
-
-        loss.backward()
         self.optimizer.step()
 
         self.logger.info(f"Loss: {loss.item()}")
@@ -1338,7 +1343,9 @@ class ALTrainer(BaseTrainer):
             if id == 0:
                 continue
 
-            self.logger.info(f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}")
+            self.logger.info(
+                f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
+            )
 
         self.logger.info(f"Average: {avg_metric_per_cls.mean(0).tolist()}")
 
@@ -1353,7 +1360,7 @@ class ALTrainer(BaseTrainer):
                 f"test/metric/hd95": avg_hd.item(),
                 f"test/valid/metric/asd": avg_asd.item(),
                 f"test/valid/metric/jc": avg_jc.item(),
-                f"round_step": self.current_round
+                f"round_step": self.current_round,
             }
             self.wandb_runner.log(test_metric)
         # save:
