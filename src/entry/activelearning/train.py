@@ -74,14 +74,15 @@ def train_entry():
     save_metric = args_dict.pop("save_metric")
     active_selector = args_dict.pop("active_selector")
 
+    args_dict["optimizer_name"] = optimizer
+    args_dict["optimizer_kwargs"] = {}
+    args_dict["lr_scheduler_name"] = lr_scheduler
+    args_dict["loss_name"] = loss
+    args_dict["save_metric_name"] = save_metric
+    args_dict["active_selector_name"] = active_selector
+
     trainer = ALTrainer(
         config=args_dict,
-        active_selector_name=active_selector,
-        optimizer_name=optimizer,
-        optimizer_kwargs={},
-        lr_scheduler_name=lr_scheduler,
-        loss_name=loss,
-        save_metric_name=save_metric,
         **args_dict,
     )
     trainer.initialize()
