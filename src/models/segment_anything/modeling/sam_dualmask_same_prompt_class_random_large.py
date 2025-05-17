@@ -283,7 +283,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                     multimask_output=multimask_output,
                 )
             )
-            
+
             # Obtain the pseudo labels used for generating prompts
             with torch.no_grad():
                 if self.dropout_rate > 0:
@@ -600,6 +600,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                         loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
                             binary_msk, self.bbox_change_rate[1]
                         )
+                        boxes_label[idx, cls - 1] = cls
                 else:
                     (
                         points_prompt[idx, cls_slice, 0],
