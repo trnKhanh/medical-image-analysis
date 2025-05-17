@@ -17,7 +17,7 @@ def calculate_metric_percase(pred, gt):
     gt[gt > 0] = 1
 
     dice = np.zeros(1)
-    hd95 = np.nan
+    hd95 = np.array([np.nan])
 
     if pred.sum() > 0:
         dice = metric.binary.dc(pred, gt)
@@ -415,8 +415,8 @@ def calculate_metric_percase_nan(pred, gt, raw_spacing):
         jc = metric.binary.jc(pred, gt)
     else:
         dice = np.zeros(1)
-        asd = np.nan
-        hd95 = np.nan
+        asd = np.array([np.nan])
+        hd95 = np.array([np.nan])
         jc = np.zeros(1)
     return dice, hd95, asd, jc
 
