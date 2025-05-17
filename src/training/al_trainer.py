@@ -109,7 +109,7 @@ class ALConfig(object):
         grad_norm: float = 10.0,
         num_iters: int = 4000,
         start_lr: float = 1e-3,
-        lr_scheduler_name: Literal["poly"] = "poly",
+        lr_scheduler_name: Literal["poly", "none"] = "poly",
         lr_warmup_iter: int = 5000,
         save_freq_epoch: int = 100,
         valid_freq_iter: int = 200,
@@ -597,6 +597,8 @@ class ALTrainer(BaseTrainer):
                 self.config.num_iters,
                 self.config.lr_warmup_iter,
             )
+        elif self.config.lr_scheduler_name == "none":
+            lr_scheduler = None
         else:
             raise ValueError(
                 f'Learning rate scheduler "{self.config.lr_scheduler_name}" not supported'
@@ -1036,8 +1038,9 @@ class ALTrainer(BaseTrainer):
 
         self.logger.info(f"Iteration {self.current_iter}:")
 
-        self.lr_scheduler.step(self.current_iter)
-        self.logger.info(f"lr: {self.lr_scheduler.get_last_lr()}")
+        if self.lr_scheduler:
+            self.lr_scheduler.step(self.current_iter)
+        self.logger.info(f"lr: {self.optimizer.param_groups[0]['lr']}")
 
         image_batch, label_batch = (
             sampled_batch["image"],
@@ -1069,7 +1072,7 @@ class ALTrainer(BaseTrainer):
         self.epoch_train_outputs.append({"loss": loss})
 
         if self.use_wandb:
-            lr = self.lr_scheduler.get_last_lr()[0]
+            lr = self.optimizer.param_groups[0]["lr"]
             train_metric = {
                 f"round_{self.current_round}/train/iter/lr": lr,
                 f"round_{self.current_round}/train/iter/loss": loss,
