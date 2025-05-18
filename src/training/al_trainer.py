@@ -534,7 +534,7 @@ class ALTrainer(BaseTrainer):
             drop_last=False,
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
-            worker_init_fn=_worker_init_fn
+            worker_init_fn=_worker_init_fn,
         )
         return train_dataloader
 
@@ -798,7 +798,8 @@ class ALTrainer(BaseTrainer):
         if self.use_wandb:
             self.wandb_runner.log_artifact(
                 data_list_path,
-                name=f"data_list_{self.wandb_runner.id}_round_{self.current_round}",
+                name=f"data_list_{self.wandb_runner.id}",
+                aliases=[f"round_{self.current_round}"],
                 type="data_list",
             )
 
@@ -830,8 +831,12 @@ class ALTrainer(BaseTrainer):
         if self.use_wandb:
             self.wandb_runner.log_model(
                 ckpt_path,
-                name=f"model_{self.wandb_runner.id}_round_{self.current_round}",
-                aliases=[f"epoch_{self.current_epoch}", "final"],
+                name=f"model_{self.wandb_runner.id}",
+                aliases=[
+                    f"epoch_{self.current_epoch}",
+                    "final",
+                    f"round_{self.current_round}",
+                ],
             )
 
         self.load_model_checkpoint(
@@ -879,8 +884,11 @@ class ALTrainer(BaseTrainer):
             if self.use_wandb:
                 self.wandb_runner.log_model(
                     ckpt_path,
-                    name=f"model_{self.wandb_runner.id}_round_{self.current_round}",
-                    aliases=[f"epoch_{self.current_epoch}"],
+                    name=f"model_{self.wandb_runner.id}",
+                    aliases=[
+                        f"epoch_{self.current_epoch}",
+                        f"round_{self.current_round}",
+                    ],
                 )
 
         train_loss = (
@@ -993,10 +1001,11 @@ class ALTrainer(BaseTrainer):
             if self.use_wandb:
                 self.wandb_runner.log_model(
                     ckpt_path,
-                    name=f"best_model_{self.wandb_runner.id}_round_{self.current_round}",
+                    name=f"best_model_{self.wandb_runner.id}",
                     aliases=[
                         f"iter_{self.current_iter}",
                         f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
+                        f"round_{self.current_round}",
                     ],
                 )
             is_improved = True
