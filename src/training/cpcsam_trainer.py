@@ -83,6 +83,7 @@ class CPCSAMConfig(object):
         # Model parameters
         in_channels: int = 3,
         num_classes: int = 3,
+        num_decoders: int = 3,
         patch_size: int | tuple[int, int] | None = None,
         image_size: int | tuple[int, int] | None = None,
         sam_name: str = "vit_b_dualmask_same_prompt_class_random_large",
@@ -157,6 +158,7 @@ class CPCSAMConfig(object):
         # >>> Model parameters
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.num_decoders = num_decoders
         self.patch_size = patch_size
         self.image_size = image_size
         self.sam_name = sam_name
@@ -319,6 +321,7 @@ class CPCSAMTrainer(BaseTrainer):
             f"{current_time_str}",
             f"patchsz-{self.config.patch_size}",
             f"imgsz-{self.config.image_size}",
+            f"decoders-{self.config.num_decoders}",
             f"lora-{self.config.lora_rank}",
             f"prompt-{self.config.promptmode}",
             f"dropout-{self.config.dropout_rate}",
@@ -470,6 +473,7 @@ class CPCSAMTrainer(BaseTrainer):
             dropout_rate=self.config.dropout_rate,
             num_points_prompt=self.config.num_points_prompt,
             bbox_change_rate=self.config.bbox_change_rate,
+            num_decoders=self.config.num_decoders,
         )
         self.model = LoRA_Sam(self.sam, self.config.lora_rank)
 
@@ -718,6 +722,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.logger.info(f"model: {self.model}")
         self.logger.info(f"  num_classes: {self.config.num_classes}")
+        self.logger.info(f"  num_decoders: {self.config.num_decoders}")
         self.logger.info(f"  patch_size: {self.config.patch_size}")
         self.logger.info(f"  image_size: {self.config.image_size}")
         self.logger.info(f"  pretrained_model: {self.config.model_ckpt}")
@@ -752,7 +757,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  num_workers: {self.config.num_workers}")
         self.logger.info(f"  pin_memory: {self.config.pin_memory}")
 
-        self.logger.info(f"optimizer: {self.config.optimizer_name}")
+        self.logger.info(f"optimizer: {self.optimizer}")
         self.logger.info(f"  lr_warmup_iter: {self.config.lr_warmup_iter}")
         self.logger.info(f"  lr_scheduler: {self.config.lr_scheduler_name}")
         self.logger.info(f"  start_lr: {self.config.start_lr}")
@@ -1286,14 +1291,14 @@ class CPCSAMTrainer(BaseTrainer):
                                 self.config.labeled_batch_size :
                             ],
                             pseudo_label_prompt,
-                            0.5,
+                            self.config.dice_weight,
                         )
                         consist_loss_round2 += consistency_loss
 
                 consistency_loss_r, _, _ = self.supervised_loss(
                     low_res_logits_prompt_r[self.config.labeled_batch_size :],
                     pseudo_label_prompt,
-                    0.5,
+                    self.config.dice_weight,
                 )
                 consist_loss_round2_r += consistency_loss_r
 
