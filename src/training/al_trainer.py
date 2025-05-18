@@ -1,4 +1,5 @@
 import random
+from copy import deepcopy
 import os
 from functools import partial
 from datetime import datetime
@@ -510,8 +511,15 @@ class ALTrainer(BaseTrainer):
         )
 
     def get_train_dataloader(self, active_dataset: ActiveDataset):
+        train_dataset = active_dataset.get_train_dataset()
+        oversampled_dataset = deepcopy(train_dataset)
+
+        total_seen_samples = self.config.num_iters * self.config.batch_size
+        num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
+        oversampled_dataset.image_idx = oversampled_dataset.image_idx * num_extended
+
         train_dataloader = DataLoader(
-            dataset=active_dataset.get_train_dataset(),
+            dataset=oversampled_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
             drop_last=False,
@@ -614,7 +622,7 @@ class ALTrainer(BaseTrainer):
                 },
                 ce_loss=torch.nn.CrossEntropyLoss,
                 ce_kwargs={},
-                default_dice_weight=0.8,
+                default_dice_weight=0.5,
             )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
@@ -1062,6 +1070,7 @@ class ALTrainer(BaseTrainer):
         ):
             output = self.model(image_batch)
             loss, _, _ = self.supervised_loss(output, label_batch)
+            loss = loss * 2
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -1146,6 +1155,7 @@ class ALTrainer(BaseTrainer):
 
         if hasattr(self, "supervised_loss"):
             loss, _, _ = self.supervised_loss(output, loss_label_batch)
+            loss = loss * 2
         else:
             loss = None
 
@@ -1205,6 +1215,7 @@ class ALTrainer(BaseTrainer):
 
         if hasattr(self, "supervised_loss"):
             loss, _, _ = self.supervised_loss(output, loss_label_batch)
+            loss = loss * 2
         else:
             loss = None
 
