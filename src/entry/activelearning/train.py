@@ -49,7 +49,8 @@ def parse_args():
     parser.add_argument("--valid-freq-iter", default=200, type=int)
     parser.add_argument("--save-metric", default="dice", type=str)
     parser.add_argument("--loss", default="dice+ce", type=str)
-    parser.add_argument("--dice-weight", default=0.8, type=float)
+    parser.add_argument("--dice-weight", default=1.0, type=float)
+    parser.add_argument("--ce-weight", default=1.0, type=float)
     parser.add_argument("--early-stop-max-patience", default=None, type=int)
     # <<< Training parameters
 

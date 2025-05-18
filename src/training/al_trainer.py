@@ -118,7 +118,8 @@ class ALConfig(object):
         save_metric_name: Literal["dice", "hd", "loss"] = "dice",
         maximum_save_metric: bool | None = None,
         loss_name: Literal["dice+ce"] = "dice+ce",
-        dice_weight: float = 0.8,
+        dice_weight: float = 1.0,
+        ce_weight: float = 1.0,
         early_stop_max_patience: int | None = None,
         # Inference parameters
         stride: int | tuple[int, ...] | list[int] | None = None,
@@ -181,6 +182,7 @@ class ALConfig(object):
         self.early_stop_max_patience = early_stop_max_patience
         self.loss_name = loss_name
         self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
         # <<< Training parameters
 
         # >>> Inference parameters
@@ -290,6 +292,7 @@ class ALTrainer(BaseTrainer):
             f"lrwarm-{self.config.lr_warmup_iter}",
             f"startlr-{self.config.start_lr}",
             f"dice-{self.config.dice_weight}",
+            f"ce-{self.config.ce_weight}",
         ]
         if self.config.exp_name:
             snapshot_list.append(self.config.exp_name)
@@ -516,7 +519,9 @@ class ALTrainer(BaseTrainer):
 
         total_seen_samples = self.config.num_iters * self.config.batch_size
         num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
-        oversampled_dataset.image_idx = oversampled_dataset.image_idx * num_extended
+        oversampled_dataset.image_idx = (
+            oversampled_dataset.image_idx * num_extended
+        )
 
         train_dataloader = DataLoader(
             dataset=oversampled_dataset,
@@ -619,10 +624,14 @@ class ALTrainer(BaseTrainer):
                     "num_classes": self.config.num_classes,
                     "smooth": 1e-5,
                     "do_bg": True,
+                    "softmax": True,
+                    "batch": False,
+                    "squared": False,
                 },
                 ce_loss=torch.nn.CrossEntropyLoss,
                 ce_kwargs={},
-                default_dice_weight=0.5,
+                default_dice_weight=self.config.dice_weight,
+                default_ce_weight=self.config.ce_weight,
             )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
@@ -702,6 +711,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
         self.logger.info(f"dice_weight: {self.config.dice_weight}")
+        self.logger.info(f"ce_weight: {self.config.ce_weight}")
         self._remove_config_file()
 
         if self.use_wandb and self.config_path:
@@ -1043,24 +1053,17 @@ class ALTrainer(BaseTrainer):
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
 
-        image_batch, label_batch = image_batch.to(self.device), label_batch.to(
-            self.device
-        )
+        image_batch, label_batch = image_batch.to(
+            self.device, dtype=torch.float32
+        ), label_batch.to(self.device, dtype=torch.long)
 
-
-        with (
-            torch.autocast(self.device.type, enabled=True)
-            if self.device.type == "cuda"
-            else dummy_context()
-        ):
-            output = self.model(image_batch)
-            loss, _, _ = self.supervised_loss(output, label_batch)
-            loss = loss * 2
+        output = self.model(image_batch)
+        loss = self.supervised_loss(output, label_batch)
 
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), self.config.grad_norm
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.model.parameters(), max_norm=self.config.grad_norm
         )
         self.optimizer.step()
 
@@ -1139,8 +1142,7 @@ class ALTrainer(BaseTrainer):
             loss_label_batch = label_batch
 
         if hasattr(self, "supervised_loss"):
-            loss, _, _ = self.supervised_loss(output, loss_label_batch)
-            loss = loss * 2
+            loss = self.supervised_loss(output, loss_label_batch)
         else:
             loss = None
 
@@ -1199,8 +1201,7 @@ class ALTrainer(BaseTrainer):
             loss_label_batch = label_batch
 
         if hasattr(self, "supervised_loss"):
-            loss, _, _ = self.supervised_loss(output, loss_label_batch)
-            loss = loss * 2
+            loss = self.supervised_loss(output, loss_label_batch)
         else:
             loss = None
 
