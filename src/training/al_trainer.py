@@ -946,26 +946,11 @@ class ALTrainer(BaseTrainer):
             valid_metric = {
                 f"round_{self.current_round}/valid/metric/dsc": avg_dsc.item(),
                 f"round_{self.current_round}/valid/metric/hd95": avg_hd.item(),
-                f"round_{self.current_round}/valid/metric/asd": avg_asd.item(),
-                f"round_{self.current_round}/valid/metric/jc": avg_jc.item(),
                 f"round_{self.current_round}/valid/metric/loss": loss.item(),
                 f"round_{self.current_round}_train_epoch": self.current_epoch,
                 f"round_{self.current_round}_train_iter": self.current_iter,
                 f"round_{self.current_round}_valid_step": self.current_iter,
             }
-            for i in range(self.config.num_classes):
-                valid_metric[
-                    f"round_{self.current_round}/valid/metric_per_cls/dsc/class_{i}"
-                ] = dsc_per_class[i].item()
-                valid_metric[
-                    f"round_{self.current_round}/valid/metric_per_cls/hd95/class_{i}"
-                ] = hd_per_class[i].item()
-                valid_metric[
-                    f"round_{self.current_round}/valid/metric_per_cls/asd/class_{i}"
-                ] = asd_per_class[i].item()
-                valid_metric[
-                    f"round_{self.current_round}/valid/metric_per_cls/jc/class_{i}"
-                ] = jc_per_class[i].item()
 
             self.wandb_runner.log(valid_metric)
 
@@ -1369,8 +1354,8 @@ class ALTrainer(BaseTrainer):
             test_metric = {
                 f"test/metric/dsc": avg_dsc.item(),
                 f"test/metric/hd95": avg_hd.item(),
-                f"test/valid/metric/asd": avg_asd.item(),
-                f"test/valid/metric/jc": avg_jc.item(),
+                f"test/metric/asd": avg_asd.item(),
+                f"test/metric/jc": avg_jc.item(),
                 f"round_step": self.current_round,
             }
             self.wandb_runner.log(test_metric)
