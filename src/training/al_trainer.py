@@ -30,13 +30,9 @@ from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
 from datasets import ACDCDataset, ActiveDataset, ExtendableDataset
-from losses.compound_losses import DiceAndCELoss, DualBranchDiceAndCELoss
+from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
-from losses.contrastive_loss import PrototypeContrastiveLoss
-from losses.adv_loss import VAT2d
-from memories.feature_memory import FeatureMemory
 from scheduler.lr_scheduler import PolyLRScheduler
-from scheduler.ramps import SigmoidRampUp
 
 from utils import get_path, draw_mask, dummy_context
 
@@ -65,7 +61,7 @@ from transforms.common import (
     RandomChoiceTransform,
 )
 
-from activelearning import ActiveSelector, RandomSelector, EntropySelector
+from activelearning import ActiveSelector, RandomSelector, EntropySelector, ConfidenceSelector, MarginSelector
 
 
 class ALConfig(object):
@@ -104,7 +100,7 @@ class ALConfig(object):
         # Training parameters
         num_rounds: int = 5,
         budget: int = 10,
-        active_selector_name: Literal["random", "entropy"] = "random",
+        active_selector_name: Literal["random", "entropy", "confidence", "margin"] = "random",
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
@@ -646,6 +642,18 @@ class ALTrainer(BaseTrainer):
             self.active_selector = RandomSelector()
         elif self.config.active_selector_name == "entropy":
             self.active_selector = EntropySelector(
+                self.config.batch_size,
+                self.config.num_workers,
+                self.config.pin_memory,
+            )
+        elif self.config.active_selector_name == "confidence":
+            self.active_selector = ConfidenceSelector(
+                self.config.batch_size,
+                self.config.num_workers,
+                self.config.pin_memory,
+            )
+        elif self.config.active_selector_name == "margin":
+            self.active_selector = MarginSelector(
                 self.config.batch_size,
                 self.config.num_workers,
                 self.config.pin_memory,
