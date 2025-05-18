@@ -216,8 +216,12 @@ class ALConfig(object):
 
 
 def _worker_init_fn(worker_id):
-    seed = int(os.environ["CPCSAM_SEED"] or 0)
-    random.seed(seed + worker_id)
+    seed = int(os.environ["AL_SEED"] or 0)
+    seed = seed + worker_id
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 class ALTrainer(BaseTrainer):
@@ -530,6 +534,7 @@ class ALTrainer(BaseTrainer):
             drop_last=False,
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
+            worker_init_fn=_worker_init_fn
         )
         return train_dataloader
 
