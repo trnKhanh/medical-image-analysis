@@ -61,7 +61,14 @@ from transforms.common import (
     RandomChoiceTransform,
 )
 
-from activelearning import ActiveSelector, RandomSelector, EntropySelector, ConfidenceSelector, MarginSelector
+from activelearning import (
+    ActiveSelector,
+    RandomSelector,
+    EntropySelector,
+    ConfidenceSelector,
+    MarginSelector,
+    CoresetSelector,
+)
 
 
 class ALConfig(object):
@@ -100,7 +107,14 @@ class ALConfig(object):
         # Training parameters
         num_rounds: int = 5,
         budget: int = 10,
-        active_selector_name: Literal["random", "entropy", "confidence", "margin"] = "random",
+        active_selector_name: Literal[
+            "random",
+            "entropy",
+            "confidence",
+            "margin",
+            "coreset-l2",
+            "coreset-cosine",
+        ] = "random",
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
@@ -657,6 +671,20 @@ class ALTrainer(BaseTrainer):
                 self.config.batch_size,
                 self.config.num_workers,
                 self.config.pin_memory,
+            )
+        elif self.config.active_selector_name == "coreset-l2":
+            self.active_selector = CoresetSelector(
+                self.config.batch_size,
+                self.config.num_workers,
+                self.config.pin_memory,
+                metric="l2",
+            )
+        elif self.config.active_selector_name == "coreset-cosine":
+            self.active_selector = CoresetSelector(
+                self.config.batch_size,
+                self.config.num_workers,
+                self.config.pin_memory,
+                metric="cosine",
             )
         else:
             raise ValueError(
