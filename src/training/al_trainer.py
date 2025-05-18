@@ -988,39 +988,39 @@ class ALTrainer(BaseTrainer):
 
         if is_improved:
             self.current_patience = 0
-            if self.use_wandb:
-                text_lines = [
-                    f"round={self.current_round}",
-                    f"iter={self.current_iter}",
-                    f"epoch={self.current_epoch}",
-                    f"metric={self._best_valid_metric.item():.4f}",
-                    f"dsc="
-                    + "["
-                    + ", ".join([f"{x:.4f}" for x in dsc_per_class.tolist()])
-                    + "]",
-                    f"average_dsc={avg_dsc.item():.4f}",
-                    f"hd95="
-                    + "["
-                    + ", ".join([f"{x:.4f}" for x in hd_per_class.tolist()])
-                    + "]",
-                    f"average_hd95={avg_hd.item():.4f}",
-                    f"loss={loss.item():.4f}",
-                ]
-                self.wandb_runner.alert(
-                    title="Improved Performance",
-                    text="; ".join(text_lines),
-                    level="INFO",
-                )
+            # if self.use_wandb:
+            #     text_lines = [
+            #         f"round={self.current_round}",
+            #         f"iter={self.current_iter}",
+            #         f"epoch={self.current_epoch}",
+            #         f"metric={self._best_valid_metric.item():.4f}",
+            #         f"dsc="
+            #         + "["
+            #         + ", ".join([f"{x:.4f}" for x in dsc_per_class.tolist()])
+            #         + "]",
+            #         f"average_dsc={avg_dsc.item():.4f}",
+            #         f"hd95="
+            #         + "["
+            #         + ", ".join([f"{x:.4f}" for x in hd_per_class.tolist()])
+            #         + "]",
+            #         f"average_hd95={avg_hd.item():.4f}",
+            #         f"loss={loss.item():.4f}",
+            #     ]
+            #     self.wandb_runner.alert(
+            #         title="Improved Performance",
+            #         text="; ".join(text_lines),
+            #         level="INFO",
+            #     )
         else:
             self.current_patience += 1
-            if self.use_wandb and self.config.early_stop_max_patience:
-                alert_threshold = self.config.early_stop_max_patience * 0.5
-                if self.current_patience >= alert_threshold:
-                    self.wandb_runner.alert(
-                        title="Performance Stagnation",
-                        text=f"Round {self.current_round}: performance is not improved for {self.current_patience} step",
-                        level="WARN",
-                    )
+            # if self.use_wandb and self.config.early_stop_max_patience:
+            #     alert_threshold = self.config.early_stop_max_patience * 0.5
+            #     if self.current_patience >= alert_threshold:
+            #         self.wandb_runner.alert(
+            #             title="Performance Stagnation",
+            #             text=f"Round {self.current_round}: performance is not improved for {self.current_patience} step",
+            #             level="WARN",
+            #         )
 
         self._valid_end_time = time.time()
         time_elapsed = self._valid_end_time - self._valid_start_time
