@@ -61,7 +61,7 @@ def test_single_volume(
         )
 
     if loss_fn:
-        loss, _, _ = torch.Tensor(
+        loss = torch.Tensor(
             [loss_fn(m, resized_label) for m in output_masks]
         ).mean(0)
     else:

@@ -665,21 +665,14 @@ class CPCSAMTrainer(BaseTrainer):
                     "num_classes": self.config.num_classes,
                     "smooth": 1e-5,
                     "do_bg": True,
+                    "softmax": True,
+                    "batch": False,
+                    "squared": False,
                 },
                 ce_loss=torch.nn.CrossEntropyLoss,
                 ce_kwargs={},
-                default_dice_weight=0.8,
-            )
-            self.unsupervised_loss = DualBranchDiceAndCELoss(
-                dice_loss=DiceLoss,
-                dice_kwargs={
-                    "num_classes": self.config.num_classes,
-                    "smooth": 1e-5,
-                    "do_bg": True,
-                },
-                ce_loss=torch.nn.CrossEntropyLoss,
-                ce_kwargs={},
-                default_dice_weight=0.8,
+                default_dice_weight=self.config.dice_weight,
+                default_ce_weight=1 - self.config.dice_weight,
             )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
@@ -1205,10 +1198,9 @@ class CPCSAMTrainer(BaseTrainer):
             labeled_low_res_logits = low_res_logits[
                 : self.config.labeled_batch_size
             ]
-            supervised_loss, _, _ = self.supervised_loss(
+            supervised_loss = self.supervised_loss(
                 labeled_low_res_logits,
                 labeled_label_batch,
-                self.config.dice_weight,
             )
             loss1 += supervised_loss
 
@@ -1255,15 +1247,13 @@ class CPCSAMTrainer(BaseTrainer):
                     : self.config.labeled_batch_size
                 ]
 
-                supervised_loss, _, _ = self.supervised_loss(
+                supervised_loss = self.supervised_loss(
                     labeled_low_res_logits_prompt,
                     labeled_label_batch,
-                    self.config.dice_weight,
                 )
-                supervised_loss_r, _, _ = self.supervised_loss(
+                supervised_loss_r = self.supervised_loss(
                     labeled_low_res_logits_prompt_r,
                     labeled_label_batch,
-                    self.config.dice_weight,
                 )
 
                 supervised_loss_round2 += supervised_loss
@@ -1286,19 +1276,17 @@ class CPCSAMTrainer(BaseTrainer):
 
                 for id in range(num_decoders):
                     if id != prompt_idx:
-                        consistency_loss, _, _ = self.supervised_loss(
+                        consistency_loss = self.supervised_loss(
                             outputs_round2["low_res_logits"][id][
                                 self.config.labeled_batch_size :
                             ],
                             pseudo_label_prompt,
-                            self.config.dice_weight,
                         )
                         consist_loss_round2 += consistency_loss
 
-                consistency_loss_r, _, _ = self.supervised_loss(
+                consistency_loss_r = self.supervised_loss(
                     low_res_logits_prompt_r[self.config.labeled_batch_size :],
                     pseudo_label_prompt,
-                    self.config.dice_weight,
                 )
                 consist_loss_round2_r += consistency_loss_r
 
