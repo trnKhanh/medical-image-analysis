@@ -530,13 +530,10 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         points_prompt = np.zeros([b, total_points, 2])
         points_label = np.zeros([b, total_points])
         points_prompt_random = np.zeros([b, total_points, 2])
-        fit_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        loose_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        boxes_label = np.zeros([b, num_class - 1])
+        fit_boxes_prompt = np.zeros([b, num_class, 2, 2])
+        loose_boxes_prompt = np.zeros([b, num_class, 2, 2])
+        boxes_label = np.zeros([b, num_class])
 
-        from datetime import datetime
-
-        st_time = datetime.now()
         for idx in range(b):  # iterate over each image
             for cls in range(num_class):  # find points for each class
                 cls_slice = slice(cum_num_points[cls], cum_num_points[cls + 1])
@@ -589,16 +586,20 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                     )
                     points_prompt[idx, cls_slice] = center_coords
 
+                    # Generating box prompts
+                    fit_boxes_prompt[idx, cls] = self._get_bbox(
+                        binary_msk, self.bbox_change_rate[0]
+                    )
+                    if israndom:
+                        loose_boxes_prompt[idx, cls] = self._get_bbox(
+                            binary_msk, self.bbox_change_rate[1]
+                        )
+
+                    # Assign labels to prompts
                     if cls > 0:
                         points_label[idx, cls_slice] = cls
 
-                        fit_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, self.bbox_change_rate[0]
-                        )
-                        loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, self.bbox_change_rate[1]
-                        )
-                        boxes_label[idx, cls - 1] = cls
+                        boxes_label[idx, cls] = cls
                 else:
                     (
                         points_prompt[idx, cls_slice, 0],
@@ -609,17 +610,28 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                         points_prompt_random[idx, cls_slice, 1],
                     ) = (points_prompt[idx, 0, 0], points_prompt[idx, 0, 1])
                     points_label[idx, cls_slice] = 0
+
+                    fit_boxes_prompt[idx, cls] = fit_boxes_prompt[idx, 0].copy()
+                    loose_boxes_prompt[idx, cls] = loose_boxes_prompt[
+                        idx, 0
+                    ].copy()
+                    boxes_label[idx, cls] = 0
+
         mask_prompt = F.interpolate(
             torch.tensor(coarse_mask_np).unsqueeze(1).float(),
             self.prompt_encoder.mask_input_size,
             mode="nearest",
         ).to(coarse_mask.device)
         points_prompt = torch.tensor(points_prompt).to(coarse_mask.device)
-        points_label = torch.tensor(points_label).to(coarse_mask.device)
+        points_label = torch.tensor(points_label).to(
+            coarse_mask.device, dtype=torch.long
+        )
         points_prompt = (points_prompt, points_label)
 
         fit_boxes_prompt = torch.tensor(fit_boxes_prompt).to(coarse_mask.device)
-        boxes_label = torch.tensor(boxes_label).to(coarse_mask.device)
+        boxes_label = torch.tensor(boxes_label).to(
+            coarse_mask.device, dtype=torch.long
+        )
         fit_boxes_prompt = (fit_boxes_prompt, boxes_label)
 
         if israndom:
