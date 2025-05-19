@@ -11,6 +11,7 @@ import torchvision.transforms.functional as F
 
 from ..basedataset import BaseDataset
 from utils import get_path
+from transforms.joint_transform import JointResize
 
 
 class ACDCDataset(BaseDataset):
@@ -24,6 +25,7 @@ class ACDCDataset(BaseDataset):
     TEST_SPLIT_FILE = f"{PROCESSED_DIR}/test.list"
     NUM_CLASSES = 3
     Z_SPACING = 1
+    RAW_SPACING = [10.0, 1.4843800067901611, 1.4843800067901611]
 
     @staticmethod
     def find_samples(
@@ -63,6 +65,8 @@ class ACDCDataset(BaseDataset):
         normalize: Callable | None = None,
         transform: Callable | None = None,
         logger: Logger | None = None,
+        image_channels: int = 3,
+        image_size: int | tuple[int, int] | None = None,
     ):
         self.data_path = get_path(data_path)
         self.split = split
@@ -70,10 +74,20 @@ class ACDCDataset(BaseDataset):
         self.normalize = normalize
         self.transform = transform
         self.logger = logger
+        self.image_channels = image_channels
+        self.image_size = image_size
+
+        self.final_transform = self._get_final_transform()
 
         self.samples_list = []
 
         self._register_samples()
+
+    def _get_final_transform(self):
+        if self.image_size is None:
+            return None
+        else:
+            return JointResize(self.image_size)
 
     def _register_samples(self):
         if self.split == "train":
@@ -135,14 +149,17 @@ class ACDCDataset(BaseDataset):
         label = torch.from_numpy(label).unsqueeze(0).long()
 
         if self.split == "train":
-            image = image.repeat(3, 1, 1)
+            image = image.repeat(self.image_channels, 1, 1)
         else:
-            image = image.repeat(3, 1, 1, 1)
+            image = image.repeat(self.image_channels, 1, 1, 1)
 
         data: dict = {"image": image, "label": label}
 
         if self.transform:
             data = self.transform(data)
+
+        if self.final_transform:
+            data = self.final_transform(data)
 
         if self.normalize and normalize:
             data = self.normalize(data)
@@ -150,6 +167,7 @@ class ACDCDataset(BaseDataset):
         data["label"] = data["label"].squeeze(0)
 
         data["case_name"] = self.samples_list[index].strip("\n")
+        data["spacing"] = ACDCDataset.RAW_SPACING
 
         return data
 

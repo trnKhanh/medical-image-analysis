@@ -21,27 +21,48 @@ class DiceAndCELoss(nn.Module):
         dice_kwargs: dict = {},
         ce_loss: Callable = RobustCrossEntropyLoss,
         ce_kwargs: dict = {},
-        default_dice_weight: float = 0.5,
+        default_dice_weight: float = 1.0,
+        default_ce_weight: float = 1.0,
     ):
         super().__init__()
         self.dice_loss = dice_loss(**dice_kwargs)
         self.ce_loss = ce_loss(**ce_kwargs)
         self.default_dice_weight = default_dice_weight
+        self.default_ce_weight = default_ce_weight
 
     def forward(
         self,
-        low_res_logits,
-        low_res_label_batch,
+        outputs: torch.Tensor,
+        targets: torch.Tensor,
         dice_weight: float | None = None,
+        ce_weight: float | None = None,
     ):
         if not dice_weight:
             dice_weight = self.default_dice_weight
-        loss_ce = self.ce_loss(low_res_logits, low_res_label_batch)
-        loss_dice = self.dice_loss(
-            low_res_logits, low_res_label_batch, softmax=True
-        )
-        loss = (1 - dice_weight) * loss_ce + dice_weight * loss_dice
-        return loss, loss_ce, loss_dice
+
+        if not ce_weight:
+            ce_weight = self.default_ce_weight
+
+        loss_ce = self.ce_loss(outputs, targets)
+        loss_dice = self.dice_loss(outputs, targets)
+        loss = ce_weight * loss_ce + dice_weight * loss_dice
+        return loss
+
+    def get_dice_loss(
+        self,
+        outputs: torch.Tensor,
+        targets: torch.Tensor,
+    ):
+        loss_dice = self.dice_loss(outputs, targets)
+        return loss_dice
+
+    def get_ce_loss(
+        self,
+        outputs: torch.Tensor,
+        targets: torch.Tensor,
+    ):
+        loss_ce = self.ce_loss(outputs, targets)
+        return loss_ce
 
 
 class DualBranchDiceAndCELoss(nn.Module):

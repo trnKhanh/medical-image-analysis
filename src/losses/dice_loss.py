@@ -5,56 +5,75 @@ from torch import nn
 
 
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes: int, smooth: float = 1e-5, do_bg: bool = False):
+    def __init__(
+        self,
+        num_classes: int,
+        smooth: float = 1e-5,
+        do_bg: bool = False,
+        softmax: bool = True,
+        batch: bool = False,
+        squared: bool = False,
+    ):
         super(DiceLoss, self).__init__()
-        self.num_classes = num_classes + 1 # Include background
+        self.num_classes = num_classes + 1  # Include background
         self.smooth = smooth
         self.do_bg = do_bg
+        self.softmax = softmax
+        self.batch = batch
+        self.squared = squared
 
-    def _one_hot_encoder(self, input_tensor: torch.Tensor):
-        input_tensor = input_tensor.unsqueeze(1)
-        y_onehot = torch.zeros_like(input_tensor, dtype=torch.long)
+    def _one_hot_encoder(self, labels: torch.Tensor):
+        labels = labels.unsqueeze(1)  # B, 1, H, W
+        y_onehot = torch.zeros_like(labels, dtype=torch.long)
         y_onehot = y_onehot.expand(-1, self.num_classes, -1, -1)
-        y_onehot = torch.scatter(y_onehot, 1, input_tensor.long(), 1)
+        y_onehot = torch.scatter(y_onehot, 1, labels.long(), 1)
         return y_onehot.float()
-
-    def _dice_loss(self, score: torch.Tensor, target: torch.Tensor):
-        target = target.float()
-        intersect = torch.sum(score * target)
-        target_sum = torch.sum(target * target)
-        score_sum = torch.sum(score * score)
-        loss = (2 * intersect + self.smooth) / (score_sum + target_sum + self.smooth)
-        loss = 1 - loss
-        return loss
 
     def forward(
         self,
-        inputs: torch.Tensor,
-        target: torch.Tensor,
-        weight: list[float] | None = None,
-        softmax: bool = False,
+        outputs: torch.Tensor,
+        targets: torch.Tensor,
     ):
-        if softmax:
-            inputs = torch.softmax(inputs, dim=1)
+        if self.softmax:
+            outputs = torch.softmax(outputs, dim=1)
 
-        if inputs.size() != target.size():
-            target = self._one_hot_encoder(target)
+        if outputs.size() != targets.size():
+            targets = self._one_hot_encoder(targets)
 
-        if weight is None:
-            weight = [1.0] * self.num_classes
+        if not self.do_bg:
+            outputs = outputs[:, 1:]
+            targets = targets[:, 1:]
 
         assert (
-            inputs.size() == target.size()
-        ), "predict {} & target {} shape do not match".format(
-            inputs.size(), target.size()
+            outputs.size() == targets.size()
+        ), "inputs {} & target {} shape do not match".format(
+            outputs.size(), targets.size()
         )
 
-        loss = 0.0
-        start_index = 0 if self.do_bg else 1
-        for i in range(start_index, self.num_classes):
-            dice = self._dice_loss(inputs[:, i], target[:, i])
-            loss += dice * weight[i]
-        return loss / self.num_classes
+        axes = tuple(range(2, outputs.ndim))
+
+        # Output is (B, C)
+        if self.squared:
+            intersect = (outputs * targets).sum(axes)
+            sum_inputs = (outputs**2).sum(axes)
+            sum_targets = (targets**2).sum(axes)
+        else:
+            intersect = (outputs * targets).sum(axes)
+            sum_inputs = outputs.sum(axes)
+            sum_targets = targets.sum(axes)
+
+        if self.batch:
+            intersect = intersect.mean(0)
+            sum_inputs = sum_inputs.mean(0)
+            sum_targets = sum_targets.mean(0)
+
+        dice = 1 - (2 * intersect + self.smooth) / (
+            sum_inputs + sum_targets + self.smooth
+        )
+
+        loss = dice.mean()
+
+        return loss
 
 
 class MemoryEfficientSoftDiceLoss(nn.Module):

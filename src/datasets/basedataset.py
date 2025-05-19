@@ -13,3 +13,7 @@ class BaseDataset(Dataset, ABC):
     @abstractmethod
     def get_sample(self, index: int, normalize: bool = True) -> Any:
         pass
+
+    @abstractmethod
+    def __len__(self) -> int:
+        pass

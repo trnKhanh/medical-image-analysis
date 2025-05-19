@@ -47,5 +47,7 @@ fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
 
 cpcsam_train = "entry.cpcsam.train:train_entry"
 
+al_train = "entry.activelearning.train:train_entry"
+
 [tool.setuptools_scm]
 

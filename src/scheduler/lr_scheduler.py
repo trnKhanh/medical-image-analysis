@@ -1,4 +1,5 @@
 from typing import Optional
+import torch
 from torch.optim.lr_scheduler import _LRScheduler
 
 
@@ -36,7 +37,11 @@ class PolyLRScheduler(_LRScheduler):
                 self.initial_lr
                 * (1.0 - real_epoch / self.max_steps) ** self.exponent
             )
+
         for param_group in self.optimizer.param_groups:
-            param_group["lr"] = new_lr
+            if isinstance(param_group["lr"], torch.Tensor):
+                param_group["lr"].fill_(new_lr)
+            else:
+                param_group["lr"] = new_lr
 
         self._last_lr = [p["lr"] for p in self.optimizer.param_groups]
