@@ -9,6 +9,8 @@ import torch
 from torch.utils.data.sampler import Sampler
 import torchvision.transforms.functional as F
 
+import pandas as pd
+
 from ..basedataset import BaseDataset
 from utils import get_path
 from transforms.joint_transform import JointResize
@@ -110,6 +112,14 @@ class ACDCDataset(BaseDataset):
                 item.replace("\n", "") for item in self.samples_list
             ]
 
+        raw_spacing_path = (
+            self.data_path / ACDCDataset.PROCESSED_DIR / "raw_spacing.csv"
+        )
+        if raw_spacing_path.is_file():
+            self.raw_spacing = pd.read_csv(raw_spacing_path, index_col=0)
+        else:
+            self.raw_spacing = None
+
         if self.num is not None and self.split == "train":
             self.samples_list = self.samples_list[: self.num]
 
@@ -167,9 +177,22 @@ class ACDCDataset(BaseDataset):
         data["label"] = data["label"].squeeze(0)
 
         data["case_name"] = self.samples_list[index].strip("\n")
-        data["spacing"] = ACDCDataset.RAW_SPACING
+
+        patient_frame_id = "_".join(self.samples_list[index].split("_")[:2])
+
+        data["spacing"] = self._get_spacing(patient_frame_id)
 
         return data
+
+    def _get_spacing(self, patient_frame_id: str):
+        if self.raw_spacing is None:
+            return None
+
+        if self.split == "train":
+            return self.raw_spacing.loc[patient_frame_id][:2].values
+        else:
+            return self.raw_spacing.loc[patient_frame_id].values
+
 
 
 class TwoStreamBatchSampler(Sampler):

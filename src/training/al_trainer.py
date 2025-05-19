@@ -1240,9 +1240,6 @@ class ALTrainer(BaseTrainer):
         return metric, loss
 
     def valid_volumns(self, sampled_batch):
-        spacing = (
-            sampled_batch["spacing"] if "spacing" in sampled_batch else None
-        )
 
         image_batch, label_batch = (
             sampled_batch["image"],
@@ -1289,6 +1286,12 @@ class ALTrainer(BaseTrainer):
         label_batch = label_batch.cpu().numpy()
 
         metric = np.zeros((self.config.num_classes, 4))
+
+        if "spacing" in sampled_batch:
+            spacing = sampled_batch["spacing"][0]
+            spacing = torch.roll(spacing, 1).cpu().numpy()
+        else:
+            spacing = None
 
         for c in range(1, self.config.num_classes + 1):
             metric[c - 1] = self.calculate_metric_percase(
