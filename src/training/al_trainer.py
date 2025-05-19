@@ -358,8 +358,10 @@ class ALTrainer(BaseTrainer):
         self.logger = logging.getLogger("MIA.ALTrainer")
         self.logger.setLevel(logging.DEBUG)
 
+
         self._setup_log_file()
-        self._setup_log_shell()
+        if self.verbose:
+            self._setup_log_shell()
 
     def _setup_log_file(self):
         assert self.logger is not None
