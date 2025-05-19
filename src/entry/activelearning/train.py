@@ -42,6 +42,8 @@ def parse_args():
     parser.add_argument("--num-rounds", default=5, type=int)
     parser.add_argument("--budget", default=10, type=int)
     parser.add_argument("--active-selector", default="random", type=str)
+    parser.add_argument("--feature-path", default=None, type=str)
+    parser.add_argument("--loaded-feature-weight", default=0.0, type=float)
     parser.add_argument("--optimizer", default="adam", type=str)
     parser.add_argument("--weight-decay", default=5e-4, type=float)
     parser.add_argument("--num-iters", default=4000, type=int)

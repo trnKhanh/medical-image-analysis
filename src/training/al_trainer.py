@@ -116,6 +116,8 @@ class ALConfig(object):
             "coreset-l2",
             "coreset-cosine",
         ] = "random",
+        feature_path: Path | str | None = None,
+        loaded_feature_weight: float = 0.0,
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
@@ -184,6 +186,8 @@ class ALConfig(object):
             self.budget = -1
 
         self.active_selector_name = active_selector_name
+        self.feature_path = feature_path
+        self.loaded_feature_weight = loaded_feature_weight
         self.optimizer_name = optimizer_name
         self.optimizer_kwargs = optimizer_kwargs
         self.grad_norm = grad_norm
@@ -700,6 +704,8 @@ class ALTrainer(BaseTrainer):
                 self.config.num_workers,
                 self.config.pin_memory,
                 metric="l2",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
             )
         elif self.config.active_selector_name == "coreset-cosine":
             self.active_selector = CoresetSelector(
@@ -707,6 +713,8 @@ class ALTrainer(BaseTrainer):
                 self.config.num_workers,
                 self.config.pin_memory,
                 metric="cosine",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
             )
         else:
             raise ValueError(
@@ -758,6 +766,10 @@ class ALTrainer(BaseTrainer):
         self.logger.info(f"num_rounds: {self.config.num_rounds}")
         self.logger.info(f"budget: {self.config.budget}")
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
+        self.logger.info(f"feature_path: {self.config.feature_path}")
+        self.logger.info(
+            f"loaded_feature_weight: {self.config.loaded_feature_weight}"
+        )
         self.logger.info(f"valid_mode: {self.config.valid_mode}")
         self.logger.info(f"optimizer: {self.config.optimizer_name}")
         self.logger.info(f"  lr_warmup_iter: {self.config.lr_warmup_iter}")

@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Literal
 
 import torch
@@ -7,13 +6,9 @@ from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import pairwise_distances
-from sklearn.cluster import kmeans_plusplus
-import h5py
 
 from .active_selector import ActiveSelector
 from datasets.active_dataset import ActiveDataset
-
-from utils import get_path
 
 
 def kcenter_greedy(dist_mat, n_data, budget, init_idx):
@@ -43,7 +38,7 @@ def kcenter_greedy(dist_mat, n_data, budget, init_idx):
     return newly_selected_idx
 
 
-class CoresetSelector(ActiveSelector):
+class KMeanSelector(ActiveSelector):
     def __init__(
         self,
         batch_size: int,
@@ -51,21 +46,17 @@ class CoresetSelector(ActiveSelector):
         pin_memory: bool = True,
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
-        feature_path: Path | str | None = None,
-        loaded_feature_weight: float = 0.0,
     ) -> None:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.smooth = smooth
         self.metric = metric
-        self.feature_path = get_path(feature_path) if feature_path else None
-        self.loaded_feature_weight = loaded_feature_weight
 
     def cal_scores(
         self,
         active_dataset: ActiveDataset,
-        model: nn.Module | None,
+        model: nn.Module,
         device: torch.device,
     ):
         labeled_dataset = active_dataset.get_train_dataset()
@@ -82,58 +73,22 @@ class CoresetSelector(ActiveSelector):
             pin_memory=self.pin_memory,
         )
         feat_list = []
-        loaded_feat_list = []
 
         for sampled_batch in tqdm(dataloader):
             image_batch = sampled_batch["image"].to(device)
             case_name = sampled_batch["case_name"]
 
-            if model:
-                model.eval()
-                with torch.no_grad():
-                    feat = model.get_enc_feature(image_batch)
-                    feat = feat.cpu().numpy()
-                feat_list.append(feat)
+            model.eval()
+            with torch.no_grad():
+                feat = model.get_enc_feature(image_batch)
+                feat = feat.cpu().numpy()
 
-            if self.feature_path:
-                for idx in range(len(case_name)):
-                    case = case_name[idx]
-                    feature_file = self.feature_path / f"{case}.h5"
-                    with h5py.File(feature_file, "r") as h5f:
-                        loaded_feat_ds = h5f["feature"]
-                        assert isinstance(loaded_feat_ds, h5py.Dataset)
-                        loaded_feat = loaded_feat_ds[:]
+            feat_list.append(feat)
 
-                    loaded_feat_list.append(loaded_feat)
+        feats = np.concatenate(feat_list, axis=0)
+        feat_dist_mat = pairwise_distances(feats, metric=self.metric)
 
-        if len(loaded_feat_list):
-            loaded_feats = np.stack(loaded_feat_list, axis=0)
-            loaded_feat_dist_mat = pairwise_distances(
-                loaded_feats, metric=self.metric
-            )
-        else:
-            loaded_feats = None
-            loaded_feat_dist_mat = 0
-
-        if len(feat_list):
-            feats = np.concatenate(feat_list, axis=0)
-            feat_dist_mat = pairwise_distances(feats, metric=self.metric)
-        else:
-            feats = None
-            feat_dist_mat = 0
-
-        final_dist_mat = (
-            self.loaded_feature_weight * loaded_feat_dist_mat
-            + (1 - self.loaded_feature_weight) * feat_dist_mat
-        )
-
-        return (
-            np.array(core_list),
-            np.array(all_list),
-            loaded_feats,
-            feats,
-            final_dist_mat,
-        )
+        return np.array(core_list), np.array(all_list), feats, feat_dist_mat
 
     def select_next_batch(
         self,
@@ -144,25 +99,16 @@ class CoresetSelector(ActiveSelector):
     ):
         labeled_size, pool_size = active_dataset.get_size()
         if labeled_size == 0:
-            if self.feature_path:
-                core_list, all_list, loaded_feats, feats, feat_dist_mat = (
-                    self.cal_scores(active_dataset, None, device)
-                )
-                _, selected_indices = kmeans_plusplus(
-                    X=loaded_feats, n_clusters=select_num
-                )
-                selected_samples = list(all_list[selected_indices].tolist())
-            else:
-                scores = torch.rand(pool_size)
+            scores = torch.rand(pool_size)
 
-                _, indices = torch.sort(scores, descending=True)
-                selected_samples = [
-                    active_dataset.pool_dataset.image_idx[id]
-                    for id in indices[:select_num]
-                ]
+            _, indices = torch.sort(scores, descending=True)
+            selected_samples = [
+                active_dataset.pool_dataset.image_idx[id]
+                for id in indices[:select_num]
+            ]
         else:
-            core_list, all_list, loaded_feats, feats, feat_dist_mat = (
-                self.cal_scores(active_dataset, model, device)
+            core_list, all_list, feats, feat_dist_mat = self.cal_scores(
+                active_dataset, model, device
             )
             selected_sample_ids = kcenter_greedy(
                 dist_mat=feat_dist_mat,
