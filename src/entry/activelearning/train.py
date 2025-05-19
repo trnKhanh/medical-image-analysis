@@ -11,6 +11,9 @@ def parse_args():
     parser.add_argument("--seed", default=1337, type=int)
     parser.add_argument("--test-only", action="store_true")
     parser.add_argument("--resume", default=None, type=str)
+    parser.add_argument(
+        "--deterministic", dest="deterministic", action="store_true"
+    )
 
     # >>> Model parameters
     parser.add_argument("--num-classes", default=3, type=int)
@@ -41,6 +44,7 @@ def parse_args():
     parser.add_argument("--valid-mode", default="volumn", type=str)
     parser.add_argument("--num-rounds", default=5, type=int)
     parser.add_argument("--budget", default=10, type=int)
+    parser.add_argument("--persist-model-weight", action="store_true")
     parser.add_argument("--active-selector", default="random", type=str)
     parser.add_argument("--feature-path", default=None, type=str)
     parser.add_argument("--loaded-feature-weight", default=0.0, type=float)

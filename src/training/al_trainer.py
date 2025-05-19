@@ -68,6 +68,7 @@ from activelearning import (
     ConfidenceSelector,
     MarginSelector,
     CoresetSelector,
+    BADGESelector,
 )
 
 
@@ -108,6 +109,7 @@ class ALConfig(object):
         active_learning: bool = True,
         num_rounds: int = 5,
         budget: int = 10,
+        persist_model_weight: bool = False,
         active_selector_name: Literal[
             "random",
             "entropy",
@@ -115,6 +117,7 @@ class ALConfig(object):
             "margin",
             "coreset-l2",
             "coreset-cosine",
+            "badge",
         ] = "random",
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
@@ -184,6 +187,8 @@ class ALConfig(object):
         else:
             self.num_rounds = 1
             self.budget = -1
+
+        self.persist_model_weight = persist_model_weight
 
         self.active_selector_name = active_selector_name
         self.feature_path = feature_path
@@ -296,6 +301,7 @@ class ALTrainer(BaseTrainer):
 
     def initialize(self):
         if self.deterministic:
+            print("Change cudnn backend to deterministic")
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
         else:
@@ -682,39 +688,48 @@ class ALTrainer(BaseTrainer):
             self.active_selector = RandomSelector()
         elif self.config.active_selector_name == "entropy":
             self.active_selector = EntropySelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "confidence":
             self.active_selector = ConfidenceSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "margin":
             self.active_selector = MarginSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "coreset-l2":
             self.active_selector = CoresetSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
                 metric="l2",
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
             )
         elif self.config.active_selector_name == "coreset-cosine":
             self.active_selector = CoresetSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
                 metric="cosine",
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
+            )
+        elif self.config.active_selector_name == "badge":
+            self.active_selector = BADGESelector(
+                dice_loss=self.supervised_loss.dice_loss,
+                ce_loss=self.supervised_loss.ce_loss,
+                batch_size=1,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                multiple_loss="add",
             )
         else:
             raise ValueError(
@@ -727,6 +742,7 @@ class ALTrainer(BaseTrainer):
 
         self.logger.info(f"Training summary")
         self.logger.info("")
+        self.logger.info(f"deterministic: {self.deterministic}")
         self.logger.info(f"device: {self.device}")
         self.logger.info(f"seed: {self.seed}")
         self.logger.info(f'log_file: "{self.log_path}"')
@@ -765,6 +781,9 @@ class ALTrainer(BaseTrainer):
 
         self.logger.info(f"num_rounds: {self.config.num_rounds}")
         self.logger.info(f"budget: {self.config.budget}")
+        self.logger.info(
+            f"persist_model_weight: {self.config.persist_model_weight}"
+        )
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
         self.logger.info(f"feature_path: {self.config.feature_path}")
         self.logger.info(
@@ -850,8 +869,13 @@ class ALTrainer(BaseTrainer):
     def on_round_start(self):
         assert self.model is not None
 
-        if self.config.model_ckpt:
-            self.load_model_checkpoint(self.config.model_ckpt)
+        self._build_model()
+
+        if self.current_round > 0 and self.config.persist_model_weight:
+            self.load_model_checkpoint(
+                self.work_path
+                / f"round_{self.current_round-1}/best_model/model.pth"
+            )
 
         self.model.train()
         self.model.to(self.device)
