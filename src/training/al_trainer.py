@@ -238,6 +238,7 @@ class ALTrainer(BaseTrainer):
     def __init__(
         self,
         work_path: Path | str = Path.cwd(),
+        deterministic: bool = True,
         device: torch.device | str = torch.device("cuda"),
         config: ALConfig | dict | str | Path | None = None,
         resume: str | Path | None = None,
@@ -260,6 +261,7 @@ class ALTrainer(BaseTrainer):
         else:
             self.config = ALConfig()
 
+        self.deterministic = deterministic
         self.work_path = get_path(work_path)
         self.device = torch.device("cpu")
         self.to(device)
@@ -282,6 +284,13 @@ class ALTrainer(BaseTrainer):
         # <<< Log parameters
 
     def initialize(self):
+        if self.deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+        else:
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+
         self._set_snapshot_work_dir()
         self._setup_wandb()
         self._setup_logger()
