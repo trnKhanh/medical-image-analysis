@@ -901,9 +901,6 @@ class CPCSAMTrainer(BaseTrainer):
         time_elapsed = self._epoch_end_time - self._epoch_start_time
         self.logger.info(f"Epoch time elapsed: {time_elapsed:.3f} seconds")
 
-        for h in self.logger.handlers:
-            h.flush()
-
     def on_train_epoch_start(self):
         self._train_start_time = time.time()
         self.logger.info("Train")
