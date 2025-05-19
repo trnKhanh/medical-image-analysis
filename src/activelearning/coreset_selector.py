@@ -117,9 +117,6 @@ class CoresetSelector(ActiveSelector):
                 init_idx=np.arange(len(core_list)),
             )
 
-            selected_samples = all_list[selected_sample_ids]
-
-            for x in selected_samples:
-                assert x not in core_list
+            selected_samples = list(all_list[selected_sample_ids].tolist())
 
         return selected_samples

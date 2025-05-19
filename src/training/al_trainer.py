@@ -105,6 +105,7 @@ class ALConfig(object):
         num_workers: int = 1,
         pin_memory: bool = True,
         # Training parameters
+        active_learning: bool = True,
         num_rounds: int = 5,
         budget: int = 10,
         active_selector_name: Literal[
@@ -122,7 +123,7 @@ class ALConfig(object):
         start_lr: float = 1e-3,
         lr_scheduler_name: Literal["poly", "none"] = "poly",
         lr_warmup_iter: int = 5000,
-        save_freq_epoch: int = 100,
+        save_freq_epoch: int | None = None,
         valid_freq_iter: int = 200,
         valid_mode: Literal["volumn", "slice"] = "volumn",
         save_metric_name: Literal["dice", "hd", "loss"] = "dice",
@@ -174,8 +175,14 @@ class ALConfig(object):
         # <<< Data parameters
 
         # >>> Training parameters
-        self.num_rounds = num_rounds
-        self.budget = budget
+        self.active_learning = active_learning
+        if self.active_learning:
+            self.num_rounds = num_rounds
+            self.budget = budget
+        else:
+            self.num_rounds = 1
+            self.budget = -1
+
         self.active_selector_name = active_selector_name
         self.optimizer_name = optimizer_name
         self.optimizer_kwargs = optimizer_kwargs
@@ -303,6 +310,7 @@ class ALTrainer(BaseTrainer):
         snapshot_list = [
             f"ACDC",
             f"{current_time_str}",
+            f"al-{self.config.active_learning}",
             f"round-{self.config.num_rounds}",
             f"budget-{self.config.budget}",
             f"selector-{self.config.active_selector_name}",
@@ -366,7 +374,6 @@ class ALTrainer(BaseTrainer):
     def _setup_logger(self):
         self.logger = logging.getLogger("MIA.ALTrainer")
         self.logger.setLevel(logging.DEBUG)
-
 
         self._setup_log_file()
         if self.verbose:
@@ -542,17 +549,21 @@ class ALTrainer(BaseTrainer):
         train_dataset = active_dataset.get_train_dataset()
         oversampled_dataset = deepcopy(train_dataset)
 
-        total_seen_samples = self.config.num_iters * self.config.batch_size
-        num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
-        oversampled_dataset.image_idx = (
-            oversampled_dataset.image_idx * num_extended
-        )
+        if len(oversampled_dataset) < self.config.batch_size:
+            # If dataset is not enough for batch_size, we oversample it
+            total_seen_samples = self.config.num_iters * self.config.batch_size
+            num_extended = int(
+                np.ceil(self.config.batch_size / len(train_dataset))
+            )
+            oversampled_dataset.image_idx = (
+                oversampled_dataset.image_idx * num_extended
+            )
 
         train_dataloader = DataLoader(
             dataset=oversampled_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
-            drop_last=False,
+            drop_last=True,
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
             worker_init_fn=_worker_init_fn,
@@ -836,11 +847,16 @@ class ALTrainer(BaseTrainer):
         data_list_path = (
             self.work_path / f"round_{self.current_round}/data_list.json"
         )
+        if self.config.active_learning:
+            new_samples = self.active_selector.select_next_batch(
+                self.active_dataset, self.config.budget, self.model, self.device
+            )
 
-        new_samples = self.active_selector.select_next_batch(
-            self.active_dataset, self.config.budget, self.model, self.device
-        )
-        self.active_dataset.extend_train_set(new_samples)
+            self.active_dataset.extend_train_set(new_samples)
+        else:
+            pool_samples = deepcopy(self.active_dataset.pool_dataset.image_idx)
+            self.active_dataset.extend_train_set(pool_samples)
+
         self.active_dataset.save_data_list(data_list_path)
         if self.use_wandb:
             self.wandb_runner.log_artifact(
@@ -921,7 +937,10 @@ class ALTrainer(BaseTrainer):
         self.model.train()
 
     def on_train_epoch_end(self):
-        if (self.current_epoch + 1) % self.config.save_freq_epoch == 0:
+        if (
+            self.config.save_freq_epoch
+            and (self.current_epoch + 1) % self.config.save_freq_epoch == 0
+        ):
             ckpt_path = (
                 self.work_path
                 / f"round_{self.current_round}/epoch_{self.current_epoch}"
