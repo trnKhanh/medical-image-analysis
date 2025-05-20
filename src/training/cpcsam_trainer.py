@@ -123,6 +123,8 @@ class CPCSAMConfig(object):
         maximum_save_metric: bool | None = None,
         ## Loss parameters
         loss_name: Literal["dice+ce"] = "dice+ce",
+        dice_batch: bool = False,
+        dice_squared: bool = False,
         dice_weight: float = 0.8,
         ### Loss 2: cross-prompting loss
         loss2_weight: float = 1.0,
@@ -198,6 +200,8 @@ class CPCSAMConfig(object):
         self.save_metric_name = save_metric_name
         self.maximum_save_metric = maximum_save_metric
         self.loss_name = loss_name
+        self.dice_batch = dice_batch
+        self.dice_squared = dice_squared
         self.dice_weight = dice_weight
         # > Loss 2: cross-prompting loss
         self.loss2_weight = loss2_weight
@@ -666,8 +670,8 @@ class CPCSAMTrainer(BaseTrainer):
                     "smooth": 1e-5,
                     "do_bg": True,
                     "softmax": True,
-                    "batch": False,
-                    "squared": False,
+                    "batch": self.config.dice_batch,
+                    "squared": self.config.dice_squared,
                 },
                 ce_loss=torch.nn.CrossEntropyLoss,
                 ce_kwargs={},
@@ -762,6 +766,8 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"warmup_iter: {self.config.warmup_iter}")
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
+        self.logger.info(f"dice_batch: {self.config.dice_batch}")
+        self.logger.info(f"dice_squared: {self.config.dice_squared}")
         self.logger.info(f"dice_weight: {self.config.dice_weight}")
         self.logger.info(f"loss2_weight: {self.config.loss2_weight}")
         self.logger.info(
