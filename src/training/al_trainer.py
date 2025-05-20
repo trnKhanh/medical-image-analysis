@@ -29,7 +29,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
-from datasets import ACDCDataset, ActiveDataset, ExtendableDataset
+from datasets import ACDCDataset, ActiveDataset, ExtendableDataset, TN3KDataset
 from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
 from scheduler.lr_scheduler import PolyLRScheduler
@@ -98,7 +98,7 @@ class ALConfig(object):
         image_size: int | tuple[int, int] | None = None,
         model_ckpt: Path | str | None = None,
         # Data parameters
-        dataset: Literal["ACDC"] = "ACDC",
+        dataset: Literal["ACDC", "tn3k"] = "ACDC",
         data_path: Path | str = "data",
         do_augment: bool = False,
         do_normalize: bool = False,
@@ -315,7 +315,7 @@ class ALTrainer(BaseTrainer):
     def _set_snapshot_work_dir(self):
         current_time_str = datetime.now().strftime("%Y%m%d_%H")
         snapshot_list = [
-            f"ACDC",
+            f"{self.config.dataset}",
             f"{current_time_str}",
             f"al-{self.config.active_learning}",
             f"round-{self.config.num_rounds}",
@@ -502,42 +502,65 @@ class ALTrainer(BaseTrainer):
             self.logger.warn(f"Failed to save model checkpoint to {ckpt}")
             self.logger.exception(e)
 
+    def get_dataset(
+        self,
+        split: Literal["train", "valid", "test"],
+        include_transform: bool = False,
+    ):
+        if split == "train":
+            _transform = self._get_train_transform()
+            _normalize = self._get_train_normalize()
+            _image_size = self.config.image_size
+        else:
+            _transform = self._get_valid_transform()
+            _normalize = self._get_valid_normalize()
+            _image_size = None
+
+        if not include_transform:
+            _transform = None
+
+        if self.config.dataset == "ACDC":
+            dataset = ACDCDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        elif self.config.dataset == "tn3k":
+            dataset = TN3KDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        else:
+            raise ValueError(f"{self.config.dataset} dataset is undefined")
+
+        return dataset
+
     def get_data(self):
-        labeled_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="train",
-            normalize=self._get_train_normalize(),
-            transform=self._get_train_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-            image_size=self.config.image_size,
-        )
-        pool_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="train",
-            normalize=self._get_train_normalize(),
-            transform=None,
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-            image_size=self.config.image_size,
-        )
+        labeled_dataset = self.get_dataset("train", include_transform=True)
+        pool_dataset = self.get_dataset("train", include_transform=False)
+        valid_dataset = self.get_dataset("valid", include_transform=True)
+
         ex_labeled_dataset = ExtendableDataset(labeled_dataset, [])
         ex_pool_dataset = ExtendableDataset(pool_dataset)
 
         active_dataset = ActiveDataset(ex_labeled_dataset, ex_pool_dataset)
 
-        valid_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="valid",
-            normalize=self._get_valid_normalize(),
-            transform=self._get_valid_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-        )
-
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
-            batch_size=1,
+            batch_size=(
+                1
+                if self.config.valid_mode == "volumn"
+                else self.config.batch_size
+            ),
             shuffle=False,
             drop_last=False,
             num_workers=1,
@@ -560,9 +583,7 @@ class ALTrainer(BaseTrainer):
         # For some reasons, this implementation is extremely faster compared
         # to just oversample to batch_size
         total_seen_samples = self.config.num_iters * self.config.batch_size
-        num_extended = int(
-            np.ceil(total_seen_samples / len(train_dataset))
-        )
+        num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
         oversampled_dataset.image_idx = (
             oversampled_dataset.image_idx * num_extended
         )
@@ -1033,8 +1054,8 @@ class ALTrainer(BaseTrainer):
             return old_metric > new_metric
 
     def on_valid_epoch_end(self):
-        metric = torch.stack(
-            [o["metric"][:, :] for o in self.epoch_valid_outputs]
+        metric = torch.cat(
+            [o["metric"][:, :] for o in self.epoch_valid_outputs], dim=0
         ).nanmean(0)
         loss = torch.stack(
             [o["loss"] for o in self.epoch_valid_outputs]
@@ -1222,11 +1243,7 @@ class ALTrainer(BaseTrainer):
             }
         )
 
-    def valid_slices(self, sampled_batch, spacing=None):
-        spacing = (
-            sampled_batch["spacing"] if "spacing" in sampled_batch else None
-        )
-
+    def valid_slices(self, sampled_batch):
         image_batch, label_batch = (
             sampled_batch["image"],
             sampled_batch["label"],
@@ -1273,6 +1290,12 @@ class ALTrainer(BaseTrainer):
 
         metric = np.zeros((B, self.config.num_classes, 4))
 
+        if "spacing" in sampled_batch:
+            spacing = sampled_batch["spacing"][0]
+            spacing = torch.roll(spacing, 1).cpu().numpy()
+        else:
+            spacing = None
+
         for b in range(B):
             for c in range(1, self.config.num_classes + 1):
                 metric[b, c - 1] = self.calculate_metric_percase(
@@ -1282,11 +1305,12 @@ class ALTrainer(BaseTrainer):
         return metric, loss
 
     def valid_volumns(self, sampled_batch):
-
         image_batch, label_batch = (
             sampled_batch["image"],
             sampled_batch["label"],
         )  #  [1, c, d, h, w], [1, d, h, w]
+
+        assert image_batch.shape[0] == 1
 
         image_batch, label_batch = image_batch.to(self.device), label_batch.to(
             self.device
@@ -1327,7 +1351,7 @@ class ALTrainer(BaseTrainer):
         pred = pred.cpu().numpy()
         label_batch = label_batch.cpu().numpy()
 
-        metric = np.zeros((self.config.num_classes, 4))
+        metric = np.zeros((1, self.config.num_classes, 4))
 
         if "spacing" in sampled_batch:
             spacing = sampled_batch["spacing"][0]
@@ -1336,7 +1360,7 @@ class ALTrainer(BaseTrainer):
             spacing = None
 
         for c in range(1, self.config.num_classes + 1):
-            metric[c - 1] = self.calculate_metric_percase(
+            metric[0, c - 1] = self.calculate_metric_percase(
                 pred == c, label_batch == c, spacing
             )
 
@@ -1405,18 +1429,15 @@ class ALTrainer(BaseTrainer):
         self.train()
 
     def perform_real_test(self):
-        test_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="test",
-            normalize=self._get_valid_normalize(),
-            transform=self._get_valid_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-        )
+        test_dataset = self.get_dataset("test", include_transform=True)
 
         test_dataloader = DataLoader(
             dataset=test_dataset,
-            batch_size=1,
+            batch_size=(
+                1
+                if self.config.valid_mode == "volumn"
+                else self.config.batch_size
+            ),
             shuffle=False,
             drop_last=False,
             num_workers=1,
@@ -1431,7 +1452,7 @@ class ALTrainer(BaseTrainer):
             else:
                 metric, _ = self.valid_slices(sampled_batch)
 
-            metric_list.append(metric)
+            metric_list.extend(metric)
 
         metric_tensor = torch.from_numpy(
             np.array(metric_list)
