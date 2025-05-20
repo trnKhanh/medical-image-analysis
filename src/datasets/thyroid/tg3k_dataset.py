@@ -4,7 +4,7 @@ from logging import Logger
 from pathlib import Path
 from typing import Literal, Callable, Any
 
-import h5py
+from skimage import measure
 import numpy as np
 import torch
 from torch.utils.data.sampler import Sampler
@@ -18,15 +18,12 @@ from utils import get_path
 from transforms.joint_transform import JointResize
 
 
-class TN3KDataset(BaseDataset):
+class TG3KDataset(BaseDataset):
     CLASSES = {0: "bg", 1: "thyroid"}
 
-    TEST_IMAGES_DIR = "test-image"
-    TEST_LABELS_DIR = "test-mask"
-
-    TRAINVAL_IMAGES_DIR = "trainval-image"
-    TRAINVAL_LABELS_DIR = "trainval-mask"
-    TRAINVAL_SPLIT_FORMAT = "tn3k-trainval-fold{}.json"
+    IMAGES_DIR = "thyroid-image"
+    LABELS_DIR = "thyroid-mask"
+    TRAINVAL_SPLIT_FILE = "tg3k-trainval.json"
 
     NUM_CLASSES = 1
 
@@ -35,8 +32,8 @@ class TN3KDataset(BaseDataset):
         data_path: Path | str, require_label: bool = True
     ) -> list[dict]:
         data_path = get_path(data_path)
-        images_dir = data_path / TN3KDataset.TRAINVAL_IMAGES_DIR
-        labels_dir = data_path / TN3KDataset.TRAINVAL_LABELS_DIR
+        images_dir = data_path / TG3KDataset.IMAGES_DIR
+        labels_dir = data_path / TG3KDataset.LABELS_DIR
         samples_list = []
         for image_path in images_dir.glob("*.jpg"):
             if not image_path.is_file():
@@ -95,9 +92,8 @@ class TN3KDataset(BaseDataset):
             return JointResize(self.image_size)
 
     def _register_samples(self):
-        split_file = self.data_path / TN3KDataset.TRAINVAL_SPLIT_FORMAT.format(
-            self.fold
-        )
+        split_file = self.data_path / TG3KDataset.TRAINVAL_SPLIT_FILE
+
         with open(split_file, "r") as f:
             split_dict = json.load(f)
 
@@ -110,18 +106,10 @@ class TN3KDataset(BaseDataset):
                 f"{sample_id:04}" for sample_id in split_dict["val"]
             ]
         elif self.split == "test":
-            self.samples_list = []
-            test_images_dir = self.data_path / TN3KDataset.TEST_IMAGES_DIR
-            test_labels_dir = self.data_path / TN3KDataset.TEST_LABELS_DIR
-            for image_path in test_images_dir.glob("*.jpg"):
-                if not image_path.is_file():
-                    continue
-
-                label_path = test_images_dir / image_path.name
-                if not label_path.is_file():
-                    continue
-
-                self.samples_list.append(image_path.stem)
+            # TODO: right now we consider the test set is the same as valid set
+            self.samples_list = [
+                f"{sample_id:04}" for sample_id in split_dict["val"]
+            ]
 
     def __len__(self):
         return len(self.samples_list)
@@ -132,20 +120,8 @@ class TN3KDataset(BaseDataset):
     def get_sample(self, index: int, normalize: bool = True) -> Any:
         case = self.samples_list[index]
 
-        if self.split != "test":
-            image_path = (
-                self.data_path / f"{TN3KDataset.TRAINVAL_IMAGES_DIR}/{case}.jpg"
-            )
-            label_path = (
-                self.data_path / f"{TN3KDataset.TRAINVAL_LABELS_DIR}/{case}.jpg"
-            )
-        else:
-            image_path = (
-                self.data_path / f"{TN3KDataset.TEST_IMAGES_DIR}/{case}.jpg"
-            )
-            label_path = (
-                self.data_path / f"{TN3KDataset.TEST_LABELS_DIR}/{case}.jpg"
-            )
+        image_path = self.data_path / f"{TG3KDataset.IMAGES_DIR}/{case}.jpg"
+        label_path = self.data_path / f"{TG3KDataset.LABELS_DIR}/{case}.jpg"
 
         image_pil = Image.open(image_path)
         label_pil = Image.open(label_path)
@@ -157,6 +133,7 @@ class TN3KDataset(BaseDataset):
         label[~cls_mask] = 0
         label[cls_mask] = 1
         label = label.long()
+        label = self._process_label(label)
 
         image = image.repeat(self.image_channels, 1, 1)
 
@@ -176,3 +153,23 @@ class TN3KDataset(BaseDataset):
         data["case_name"] = case
 
         return data
+
+    def _process_label(self, label: torch.Tensor):
+        label = label.squeeze(0)
+
+        label_image = measure.label(label.numpy(), connectivity=2)
+
+        assert isinstance(label_image, np.ndarray)
+
+        region_ids, region_sizes = np.unique(label_image, return_counts=True)
+        if region_ids[0] == 0:
+            region_ids = region_ids[1:]
+            region_sizes = region_sizes[1:]
+
+        for i in range(len(region_ids)):
+            if region_sizes[i] < 10:
+                region_mask = label_image == region_ids[i]
+                label[region_mask] = 0
+        
+        return label.unsqueeze(0)
+

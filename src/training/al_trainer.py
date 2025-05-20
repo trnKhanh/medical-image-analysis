@@ -29,7 +29,13 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
-from datasets import ACDCDataset, ActiveDataset, ExtendableDataset, TN3KDataset
+from datasets import (
+    ACDCDataset,
+    ActiveDataset,
+    ExtendableDataset,
+    TN3KDataset,
+    TG3KDataset,
+)
 from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
 from scheduler.lr_scheduler import PolyLRScheduler
@@ -98,7 +104,7 @@ class ALConfig(object):
         image_size: int | tuple[int, int] | None = None,
         model_ckpt: Path | str | None = None,
         # Data parameters
-        dataset: Literal["ACDC", "tn3k"] = "ACDC",
+        dataset: Literal["ACDC", "tn3k", "tg3k"] = "ACDC",
         data_path: Path | str = "data",
         do_augment: bool = False,
         do_normalize: bool = False,
@@ -539,6 +545,16 @@ class ALTrainer(BaseTrainer):
                 image_channels=self.config.in_channels,
                 image_size=_image_size,
             )
+        elif self.config.dataset == "tg3k":
+            dataset = TG3KDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
         else:
             raise ValueError(f"{self.config.dataset} dataset is undefined")
 
@@ -556,11 +572,7 @@ class ALTrainer(BaseTrainer):
 
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
-            batch_size=(
-                1
-                if self.config.valid_mode == "volumn"
-                else self.config.batch_size
-            ),
+            batch_size=1,
             shuffle=False,
             drop_last=False,
             num_workers=1,
@@ -1201,6 +1213,7 @@ class ALTrainer(BaseTrainer):
         ), label_batch.to(self.device, dtype=torch.long)
 
         output = self.model(image_batch)
+
         loss = self.supervised_loss(output, label_batch)
 
         self.optimizer.zero_grad()
@@ -1433,11 +1446,7 @@ class ALTrainer(BaseTrainer):
 
         test_dataloader = DataLoader(
             dataset=test_dataset,
-            batch_size=(
-                1
-                if self.config.valid_mode == "volumn"
-                else self.config.batch_size
-            ),
+            batch_size=1,
             shuffle=False,
             drop_last=False,
             num_workers=1,
