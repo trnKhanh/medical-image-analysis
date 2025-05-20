@@ -485,7 +485,7 @@ class ALTrainer(BaseTrainer):
             state_dict = torch.load(ckpt, map_location=self.device)
             self.model.load_state_dict(state_dict)
 
-            self.logger.info(f"Loaded model checkpoint to {ckpt}")
+            self.logger.info(f"Loaded model checkpoint from {ckpt}")
         except Exception as e:
             self.logger.warn(f"Failed to load model checkpoint from {ckpt}")
             self.logger.exception(e)
@@ -556,15 +556,16 @@ class ALTrainer(BaseTrainer):
         train_dataset = active_dataset.get_train_dataset()
         oversampled_dataset = deepcopy(train_dataset)
 
-        if len(oversampled_dataset) < self.config.batch_size:
-            # If dataset is not enough for batch_size, we oversample it
-            total_seen_samples = self.config.num_iters * self.config.batch_size
-            num_extended = int(
-                np.ceil(total_seen_samples / len(train_dataset))
-            )
-            oversampled_dataset.image_idx = (
-                oversampled_dataset.image_idx * num_extended
-            )
+        # If dataset is not enough for batch_size, we oversample it
+        # For some reasons, this implementation is extremely faster compared
+        # to just oversample to batch_size
+        total_seen_samples = self.config.num_iters * self.config.batch_size
+        num_extended = int(
+            np.ceil(total_seen_samples / len(train_dataset))
+        )
+        oversampled_dataset.image_idx = (
+            oversampled_dataset.image_idx * num_extended
+        )
 
         train_dataloader = DataLoader(
             dataset=oversampled_dataset,
@@ -866,20 +867,16 @@ class ALTrainer(BaseTrainer):
     def on_round_start(self):
         assert self.model is not None
 
-        self._build_model()
-
-        if self.current_round > 0 and self.config.persist_model_weight:
+        data_list_path = (
+            self.work_path / f"round_{self.current_round}/data_list.json"
+        )
+        # Load model from last round to select label
+        if self.current_round > 0:
             self.load_model_checkpoint(
                 self.work_path
                 / f"round_{self.current_round-1}/best_model/model.pth"
             )
 
-        self.model.train()
-        self.model.to(self.device)
-
-        data_list_path = (
-            self.work_path / f"round_{self.current_round}/data_list.json"
-        )
         if self.config.active_learning:
             new_samples = self.active_selector.select_next_batch(
                 self.active_dataset, self.config.budget, self.model, self.device
@@ -889,6 +886,18 @@ class ALTrainer(BaseTrainer):
         else:
             pool_samples = deepcopy(self.active_dataset.pool_dataset.image_idx)
             self.active_dataset.extend_train_set(pool_samples)
+
+        # Loading model must be placed after selecting samples since we use the
+        # model to choose samples
+        self._build_model()
+        self.model.to(self.device)
+        if self.current_round > 0 and self.config.persist_model_weight:
+            self.load_model_checkpoint(
+                self.work_path
+                / f"round_{self.current_round-1}/best_model/model.pth"
+            )
+
+        self.model.train()
 
         self.active_dataset.save_data_list(data_list_path)
         if self.use_wandb:

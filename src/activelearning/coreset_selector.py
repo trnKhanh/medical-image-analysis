@@ -151,7 +151,7 @@ class CoresetSelector(ActiveSelector):
                 _, selected_indices = kmeans_plusplus(
                     X=loaded_feats, n_clusters=select_num
                 )
-                selected_samples = list(all_list[selected_indices].tolist())
+                selected_samples = list(all_list[selected_indices])
             else:
                 scores = torch.rand(pool_size)
 
@@ -171,6 +171,6 @@ class CoresetSelector(ActiveSelector):
                 init_idx=np.arange(len(core_list)),
             )
 
-            selected_samples = list(all_list[selected_sample_ids].tolist())
+            selected_samples = list(all_list[selected_sample_ids])
 
         return selected_samples

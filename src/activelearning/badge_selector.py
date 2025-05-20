@@ -123,6 +123,6 @@ class BADGESelector(ActiveSelector):
             )
             _, selected_indices = kmeans_plusplus(X=grad_embed, n_clusters=select_num)
 
-            selected_samples = list(case_name_list[selected_indices].tolist())
+            selected_samples = list(case_name_list[selected_indices])
 
         return selected_samples
