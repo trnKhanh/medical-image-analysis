@@ -304,9 +304,6 @@ class ALTrainer(BaseTrainer):
             print("Change cudnn backend to deterministic")
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
-        else:
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cudnn.deterministic = False
 
         self._set_snapshot_work_dir()
         self._setup_wandb()
@@ -563,7 +560,7 @@ class ALTrainer(BaseTrainer):
             # If dataset is not enough for batch_size, we oversample it
             total_seen_samples = self.config.num_iters * self.config.batch_size
             num_extended = int(
-                np.ceil(self.config.batch_size / len(train_dataset))
+                np.ceil(total_seen_samples / len(train_dataset))
             )
             oversampled_dataset.image_idx = (
                 oversampled_dataset.image_idx * num_extended
