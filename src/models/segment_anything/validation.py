@@ -421,6 +421,46 @@ def calculate_metric_percase_nan(pred, gt, raw_spacing):
     return dice, hd95, asd, jc
 
 
+def resize_image(
+    input: torch.Tensor, new_size: list[int] | tuple[int, int], order: int = 3
+):
+    if input.ndim == 4:
+        input_np = input.cpu().numpy()
+        B, C, H, W = input_np.shape
+        resize_input = np.zeros(
+            (B, C, new_size[0], new_size[1]), dtype=input_np.dtype
+        )
+        for b in range(B):
+            for c in range(C):
+                resize_input[b, c] = torch.from_numpy(
+                    zoom(
+                        input_np[b, c],
+                        (new_size[0] / H, new_size[1] / W),
+                        order=order,
+                    )
+                )
+
+        return torch.from_numpy(resize_input).to(
+            input.device, dtype=input.dtype
+        )
+    else:
+        input_np = input.cpu().numpy()
+        C, H, W = input_np.shape
+        resize_input = np.zeros(
+            (C, new_size[0], new_size[1]), dtype=input_np.dtype
+        )
+        for c in range(C):
+            resize_input[c] = torch.from_numpy(
+                zoom(
+                    input_np[c], (new_size[0] / H, new_size[1] / W), order=order
+                )
+            )
+
+        return torch.from_numpy(resize_input).to(
+            input.device, dtype=input.dtype
+        )
+
+
 def test_single_volume_mean(
     data_path: Path,
     image,
@@ -441,17 +481,8 @@ def test_single_volume_mean(
     image = image.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
     label = label.squeeze(0)  # D, H, W
 
-    resized_image = zoom(
-        image.cpu().numpy(),
-        (1, 1, patch_size[0] / H, patch_size[0] / W),
-        order=3,
-    )
-    resized_label = zoom(
-        label.cpu().numpy(), (1, patch_size[0] / H, patch_size[0] / W), order=0
-    )
-
-    resized_image = torch.from_numpy(resized_image).to(net.device)
-    resized_label = torch.from_numpy(resized_label).to(net.device)
+    resized_image = resize_image(image, patch_size, order=3)
+    resized_label = resize_image(label, patch_size, order=0)
 
     net.eval()
     with torch.no_grad():
@@ -461,11 +492,9 @@ def test_single_volume_mean(
         for mask in output_masks:
             ensemble_output_masks = ensemble_output_masks + mask.softmax(1)
         prediction = ensemble_output_masks.argmax(1)
-        prediction = prediction.cpu().numpy()
-        prediction = zoom(
-            prediction, (1, H / patch_size[0], W / patch_size[0]), order=0
-        )
+        prediction = resize_image(prediction, [H, W], order=0)
 
+    prediction = prediction.cpu().numpy()
     image = image.cpu().numpy()
     label = label.cpu().numpy()
 
