@@ -89,7 +89,7 @@ class ACDCDataset(BaseDataset):
         if self.image_size is None:
             return None
         else:
-            return JointResize(self.image_size)
+            return JointResize(self.image_size, use_torchvision=False)
 
     def _register_samples(self):
         if self.split == "train":
