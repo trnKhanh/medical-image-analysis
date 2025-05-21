@@ -1492,7 +1492,7 @@ class ALTrainer(BaseTrainer):
                 {f"test_performance_round_{self.current_round}": wandb_table}
             )
 
-        avg_metric_per_cls = metric_tensor.mean(0)
+        avg_metric_per_cls = metric_tensor.nanmean(0)
         self.logger.info("Real test results:")
         for id in classes.keys():
             if id == 0:
@@ -1502,10 +1502,10 @@ class ALTrainer(BaseTrainer):
                 f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
             )
 
-        self.logger.info(f"Average: {avg_metric_per_cls.mean(0).tolist()}")
+        self.logger.info(f"Average: {avg_metric_per_cls.nanmean(0).tolist()}")
 
         if self.use_wandb:
-            avg_metric = avg_metric_per_cls.mean(0)
+            avg_metric = avg_metric_per_cls.nanmean(0)
             avg_dsc = avg_metric[0]
             avg_hd = avg_metric[1]
             avg_asd = avg_metric[2]
