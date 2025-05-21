@@ -868,15 +868,6 @@ class ALTrainer(BaseTrainer):
 
         self.current_round = 0
 
-        if self.config.init_round_path:
-            round_0_path = get_path(self.config.init_round_path)
-
-            self.load_model_checkpoint(round_0_path / "best_model/model.pth")
-            self.active_dataset.load_data_list(round_0_path / "data_list.json")
-
-            self.perform_real_test()
-
-            self.current_round = 1
 
         if self.config.maximum_save_metric is None:
             if self.config.save_metric_name == "dice":
@@ -895,6 +886,16 @@ class ALTrainer(BaseTrainer):
 
         self._print_train_info()
         self._check_data_sanity()
+
+        if self.config.init_round_path:
+            round_0_path = get_path(self.config.init_round_path)
+
+            self.load_model_checkpoint(round_0_path / "best_model/model.pth")
+            self.active_dataset.load_data_list(round_0_path / "data_list.json")
+
+            self.perform_real_test()
+
+            self.current_round = 1
 
     def _check_data_sanity(self):
         sanity_path = self.work_path / "sanity"
@@ -920,10 +921,13 @@ class ALTrainer(BaseTrainer):
         )
         # Load model from last round to select label
         if self.current_round > 0:
-            self.load_model_checkpoint(
+            last_ckpt = (
                 self.work_path
                 / f"round_{self.current_round-1}/best_model/model.pth"
             )
+
+            if self.current_round > 1 or self.config.init_round_path is None:
+                self.load_model_checkpoint(last_ckpt)
 
         if self.config.active_learning:
             new_samples = self.active_selector.select_next_batch(
@@ -937,14 +941,17 @@ class ALTrainer(BaseTrainer):
 
         # Loading model must be placed after selecting samples since we use the
         # model to choose samples
-        self._build_model()
-        self.model.to(self.device)
-        if self.current_round > 0 and self.config.persist_model_weight:
-            self.load_model_checkpoint(
-                self.work_path
-                / f"round_{self.current_round-1}/best_model/model.pth"
-            )
+        if self.current_round > 0:
+            self._build_model()
+            if self.config.persist_model_weight and (
+                self.current_round > 1 or self.config.init_round_path is None
+            ):
+                self.load_model_checkpoint(
+                    self.work_path
+                    / f"round_{self.current_round-1}/best_model/model.pth"
+                )
 
+        self.model.to(self.device)
         self.model.train()
 
         self.active_dataset.save_data_list(data_list_path)
@@ -1456,7 +1463,9 @@ class ALTrainer(BaseTrainer):
     def run_training(self):
         self.train()
 
+    @torch.no_grad()
     def perform_real_test(self):
+        self.model.eval()
         test_dataset = self.get_dataset("test", include_transform=True)
 
         test_dataloader = DataLoader(
