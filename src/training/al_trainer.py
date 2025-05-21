@@ -1423,7 +1423,7 @@ class ALTrainer(BaseTrainer):
     def train(self):
         self.on_train_start()
 
-        for round in range(self.config.num_rounds):
+        while self.current_round < self.config.num_rounds:
             self.on_round_start()
             while not self.is_finished():
                 self.on_epoch_start()
