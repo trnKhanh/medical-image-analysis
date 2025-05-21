@@ -8,6 +8,11 @@ import logging
 import time
 from pathlib import Path
 
+from medpy import metric
+from einops import repeat
+from scipy.ndimage import zoom
+import h5py
+import SimpleITK as sitk
 import wandb
 import torch
 from torch import nn
@@ -1420,6 +1425,216 @@ class CPCSAMTrainer(BaseTrainer):
                     name=f"log_{self.wandb_runner.id}",
                     type="log",
                 )
+
+    def _perform_real_test(self):
+        def calculate_metric_percase_nan(pred, gt, raw_spacing):
+            pred[pred > 0] = 1
+            gt[gt > 0] = 1
+            dice = metric.binary.dc(pred, gt)
+            if pred.sum() != 0:
+                asd = metric.binary.asd(pred, gt, raw_spacing)
+                hd95 = metric.binary.hd95(pred, gt, raw_spacing)
+            else:
+                asd = np.nan
+                hd95 = np.nan
+            jc = metric.binary.jc(pred, gt)
+            return dice, hd95, asd, jc
+
+        def test_single_volume_mean(
+            image,
+            label,
+            net,
+            classes,
+            multimask_output,
+            patch_size=[256, 256],
+            input_size=[224, 224],
+            test_save_path=None,
+            case=None,
+            z_spacing=1,
+        ):
+            if len(image.shape) == 3:
+                prediction = np.zeros_like(label)
+                for ind in range(image.shape[0]):
+                    slice = image[ind, :, :]
+                    x, y = slice.shape[0], slice.shape[1]
+                    if x != patch_size[0] or y != patch_size[1]:
+                        slice = zoom(
+                            slice,
+                            (patch_size[0] / x, patch_size[1] / y),
+                            order=3,
+                        )  # previous using 0, patch_size[0], patch_size[1]
+                    inputs = (
+                        torch.from_numpy(slice)
+                        .unsqueeze(0)
+                        .unsqueeze(0)
+                        .float()
+                        .to(self.device)
+                    )
+                    inputs = repeat(
+                        inputs, "b c h w -> b (repeat c) h w", repeat=3
+                    )
+                    net.eval()
+                    with torch.no_grad():
+                        outputs = net(inputs, multimask_output, patch_size[0])
+                        output_masks1 = outputs["masks"][0]
+                        output_masks2 = outputs["masks"][1]
+                        output_masks1 = torch.softmax(output_masks1, dim=1)
+                        output_masks2 = torch.softmax(output_masks2, dim=1)
+                        output_masks = (output_masks1 + output_masks2) / 2.0
+                        out = torch.argmax(
+                            torch.softmax(output_masks, dim=1), dim=1
+                        ).squeeze(0)
+                        out = out.cpu().detach().numpy()
+                        out_h, out_w = out.shape
+                        if x != out_h or y != out_w:
+                            pred = zoom(out, (x / out_h, y / out_w), order=0)
+                        else:
+                            pred = out
+                        prediction[ind] = pred
+                # get resolution
+                case_raw = (
+                    get_path(self.config.data_path) / f"ACDC_raw/{case}.nii.gz"
+                )
+                case_raw = sitk.ReadImage(case_raw)
+                raw_spacing = case_raw.GetSpacing()
+                raw_spacing_new = []
+                raw_spacing_new.append(raw_spacing[2])
+                raw_spacing_new.append(raw_spacing[1])
+                raw_spacing_new.append(raw_spacing[0])
+                raw_spacing = raw_spacing_new
+
+            else:
+                x, y = image.shape[-2:]
+                if x != patch_size[0] or y != patch_size[1]:
+                    image = zoom(
+                        image, (patch_size[0] / x, patch_size[1] / y), order=3
+                    )
+                inputs = (
+                    torch.from_numpy(image)
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                    .float()
+                    .to(self.device)
+                )
+                inputs = repeat(inputs, "b c h w -> b (repeat c) h w", repeat=3)
+                net.eval()
+                with torch.no_grad():
+                    outputs = net(inputs, multimask_output, patch_size[0])
+                    output_masks = outputs["masks"]
+                    out = torch.argmax(
+                        torch.softmax(output_masks, dim=1), dim=1
+                    ).squeeze(0)
+                    prediction = out.cpu().detach().numpy()
+                    if x != patch_size[0] or y != patch_size[1]:
+                        prediction = zoom(
+                            prediction,
+                            (x / patch_size[0], y / patch_size[1]),
+                            order=0,
+                        )
+            metric_list = []
+            for i in range(1, classes + 1):
+                metric_list.append(
+                    calculate_metric_percase_nan(
+                        prediction == i, label == i, raw_spacing
+                    )
+                )
+
+            if test_save_path is not None:
+                img_itk = sitk.GetImageFromArray(image.astype(np.float32))
+                prd_itk = sitk.GetImageFromArray(prediction.astype(np.float32))
+                lab_itk = sitk.GetImageFromArray(label.astype(np.float32))
+                img_itk.SetSpacing((1, 1, z_spacing))
+                prd_itk.SetSpacing((1, 1, z_spacing))
+                lab_itk.SetSpacing((1, 1, z_spacing))
+                sitk.WriteImage(
+                    prd_itk, test_save_path + "/" + case + "_pred.nii.gz"
+                )
+                # sitk.WriteImage(img_itk, test_save_path + '/' + case + "_img.nii.gz")
+                # sitk.WriteImage(lab_itk, test_save_path + '/' + case + "_gt.nii.gz")
+                print("saved successfully!")
+            return metric_list
+
+        def inference(multimask_output, db_config, model, test_save_path=None):
+            processed_data_path = get_path(self.config.data_path) / "ACDC"
+            with open(processed_data_path / "test.list", "r") as f:
+                image_list = f.readlines()
+            image_list = sorted(
+                [item.replace("\n", "").split(".")[0] for item in image_list]
+            )
+
+            metric_list = 0.0
+
+            first_total = 0.0
+            second_total = 0.0
+            third_total = 0.0
+            first_list = np.zeros([len(image_list), 4])
+            second_list = np.zeros([len(image_list), 4])
+            third_list = np.zeros([len(image_list), 4])
+            count = 0
+
+            for case in tqdm(image_list):
+                h5f = h5py.File(
+                    processed_data_path / "data/{}.h5".format(case), "r"
+                )
+                image = h5f["image"][:]
+                label = h5f["label"][:]
+
+                metric_i = test_single_volume_mean(
+                    image,
+                    label,
+                    model,
+                    classes=self.config.num_classes,
+                    multimask_output=multimask_output,
+                    patch_size=[self.config.image_size, self.config.image_size],
+                    input_size=[self.config.image_size, self.config.image_size],
+                    test_save_path=test_save_path,
+                    case=case,
+                    z_spacing=db_config["z_spacing"],
+                )
+                first_metric = metric_i[0]
+                second_metric = metric_i[1]
+                third_metric = metric_i[2]
+
+                first_total += np.asarray(first_metric)
+                second_total += np.asarray(second_metric)
+                third_total += np.asarray(third_metric)
+
+                # save
+                first_list[count, 0] = first_metric[0]
+                first_list[count, 1] = first_metric[1]
+                first_list[count, 2] = first_metric[2]
+                first_list[count, 3] = first_metric[3]
+
+                second_list[count, 0] = second_metric[0]
+                second_list[count, 1] = second_metric[1]
+                second_list[count, 2] = second_metric[2]
+                second_list[count, 3] = second_metric[3]
+
+                third_list[count, 0] = third_metric[0]
+                third_list[count, 1] = third_metric[1]
+                third_list[count, 2] = third_metric[2]
+                third_list[count, 3] = third_metric[3]
+
+                count += 1
+
+            avg_metric1 = np.nanmean(first_list, axis=0)
+            avg_metric2 = np.nanmean(second_list, axis=0)
+            avg_metric3 = np.nanmean(third_list, axis=0)
+
+            print(avg_metric1, avg_metric2, avg_metric3)
+            print((avg_metric1 + avg_metric2 + avg_metric3) / 3)
+            logging.info("Testing Finished!")
+            return 1
+
+        dataset_config = {
+            "ACDC": {
+                "Dataset": ACDCDataset,
+                "num_classes": self.config.num_classes,
+                "z_spacing": 1,
+            }
+        }
+        multimask_output = True
+        inference(multimask_output, dataset_config[self.config.dataset], self.model)
 
     def perform_real_test(self):
         best_model_path = self.work_path / "best_model"
