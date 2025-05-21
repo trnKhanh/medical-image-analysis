@@ -46,6 +46,7 @@ class JointResize(BaseTransform):
         params_dict = {
             JointResize.__name__: {
                 "image_size": self.image_size,
+                "use_torchvision": self.use_torchvision,
             }
         }
         return params_dict
