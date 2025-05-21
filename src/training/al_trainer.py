@@ -250,6 +250,7 @@ class ALConfig(object):
 def _worker_init_fn(worker_id):
     seed = int(os.environ["AL_SEED"] or 0)
     seed = seed + worker_id
+    print(f"seed of worker {worker_id}: {seed}")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -284,6 +285,12 @@ class ALTrainer(BaseTrainer):
             self.config = ALConfig()
 
         self.deterministic = deterministic
+
+        if self.deterministic:
+            print("Change cudnn backend to deterministic")
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+
         self.work_path = get_path(work_path)
         self.device = torch.device("cpu")
         self.to(device)
@@ -306,10 +313,6 @@ class ALTrainer(BaseTrainer):
         # <<< Log parameters
 
     def initialize(self):
-        if self.deterministic:
-            print("Change cudnn backend to deterministic")
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
 
         self._set_snapshot_work_dir()
         self._setup_wandb()
