@@ -884,12 +884,6 @@ class CPCSAMTrainer(BaseTrainer):
                 name=f"model_{self.wandb_runner.id}",
                 aliases=[f"epoch_{self.current_epoch}", "final"],
             )
-            if self.log_path:
-                self.wandb_runner.log_artifact(
-                    self.log_path,
-                    name=f"log_{self.wandb_runner.id}",
-                    type="log",
-                )
 
         self.logger.info("")
         self.logger.info("")
@@ -1418,6 +1412,14 @@ class CPCSAMTrainer(BaseTrainer):
     def run_training(self):
         self.train()
         self.perform_real_test()
+
+        if self.use_wandb:
+            if self.log_path:
+                self.wandb_runner.log_artifact(
+                    self.log_path,
+                    name=f"log_{self.wandb_runner.id}",
+                    type="log",
+                )
 
     def perform_real_test(self):
         best_model_path = self.work_path / "best_model"
