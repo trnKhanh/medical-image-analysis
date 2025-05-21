@@ -120,6 +120,7 @@ def train_entry():
     trainer.initialize()
 
     if test_only:
+        trainer._perform_real_test()
         trainer.perform_real_test()
     else:
         trainer.run_training()

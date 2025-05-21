@@ -441,12 +441,17 @@ def test_single_volume_mean(
     image = image.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
     label = label.squeeze(0)  # D, H, W
 
-    resized_image = F.resize(
-        image, patch_size, interpolation=F.InterpolationMode.BILINEAR
+    resized_image = zoom(
+        image.cpu().numpy(),
+        (1, 1, patch_size[0] / H, patch_size[0] / W),
+        order=3,
     )
-    resized_label = F.resize(
-        label, patch_size, interpolation=F.InterpolationMode.NEAREST
+    resized_label = zoom(
+        label.cpu().numpy(), (1, patch_size[0] / H, patch_size[0] / W), order=0
     )
+
+    resized_image = torch.from_numpy(resized_image).to(net.device)
+    resized_label = torch.from_numpy(resized_label).to(net.device)
 
     net.eval()
     with torch.no_grad():
@@ -456,12 +461,12 @@ def test_single_volume_mean(
         for mask in output_masks:
             ensemble_output_masks = ensemble_output_masks + mask.softmax(1)
         prediction = ensemble_output_masks.argmax(1)
-        prediction = F.resize(
-            prediction, [H, W], interpolation=F.InterpolationMode.NEAREST
+        prediction = prediction.cpu().numpy()
+        prediction = zoom(
+            prediction, (1, H / patch_size[0], W / patch_size[0]), order=0
         )
 
     image = image.cpu().numpy()
-    prediction = prediction.cpu().numpy()
     label = label.cpu().numpy()
 
     # get resolution
