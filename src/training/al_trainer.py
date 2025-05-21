@@ -92,6 +92,7 @@ class ALConfig(object):
     def __init__(
         self,
         seed: int = 12345,
+        init_round_path: str | Path | None = None,
         # Model parameters
         in_channels: int = 1,
         num_classes: int = 3,
@@ -152,6 +153,7 @@ class ALConfig(object):
         self._config_dict = {}
 
         self.seed = seed
+        self.init_round_path = init_round_path
 
         # >>> Model parameters
         self.in_channels = in_channels
@@ -865,6 +867,16 @@ class ALTrainer(BaseTrainer):
         self._setup_active_selector()
 
         self.current_round = 0
+
+        if self.config.init_round_path:
+            round_0_path = get_path(self.config.init_round_path)
+
+            self.load_model_checkpoint(round_0_path / "best_model/model.pth")
+            self.active_dataset.load_data_list(round_0_path / "data_list.json")
+
+            self.perform_real_test()
+
+            self.current_round = 1
 
         if self.config.maximum_save_metric is None:
             if self.config.save_metric_name == "dice":

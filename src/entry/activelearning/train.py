@@ -14,6 +14,8 @@ def parse_args():
     parser.add_argument(
         "--deterministic", dest="deterministic", action="store_true"
     )
+    parser.add_argument("--init-round-path", default=None, type=str)
+
 
     # >>> Model parameters
     parser.add_argument("--num-classes", default=3, type=int)
