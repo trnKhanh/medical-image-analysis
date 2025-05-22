@@ -32,10 +32,11 @@ class PolyLRScheduler(_LRScheduler):
             new_lr = self.initial_lr * (epoch + 1) / self.warmup_steps
         else:
             real_epoch = epoch - self.warmup_steps
+            real_max_steps = self.max_steps - self.warmup_steps
 
             new_lr = (
                 self.initial_lr
-                * (1.0 - real_epoch / self.max_steps) ** self.exponent
+                * (1.0 - real_epoch / real_max_steps) ** self.exponent
             )
 
         for param_group in self.optimizer.param_groups:

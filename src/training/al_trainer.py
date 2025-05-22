@@ -654,26 +654,27 @@ class ALTrainer(BaseTrainer):
         else:
             return None
 
-    def _get_optimizer(
+    def _setup_optimizer(
         self,
-        model: nn.Module,
     ):
-        parameters = filter(lambda p: p.requires_grad, model.parameters())
+        assert self.model is not None
+
+        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
 
         if self.config.optimizer_name == "adam":
-            optimizer = torch.optim.Adam(
+            self.optimizer = torch.optim.Adam(
                 parameters,
                 betas=(0.9, 0.999),
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "adamw":
-            optimizer = torch.optim.AdamW(
+            self.optimizer = torch.optim.AdamW(
                 parameters,
                 betas=(0.9, 0.999),
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "sgd":
-            optimizer = torch.optim.SGD(
+            self.optimizer = torch.optim.SGD(
                 parameters,
                 momentum=0.9,
                 **self.config.optimizer_kwargs,
@@ -684,20 +685,18 @@ class ALTrainer(BaseTrainer):
             )
 
         if self.config.lr_scheduler_name == "poly":
-            lr_scheduler = PolyLRScheduler(
-                optimizer,
+            self.lr_scheduler = PolyLRScheduler(
+                self.optimizer,
                 self.config.start_lr,
                 self.config.num_iters,
                 self.config.lr_warmup_iter,
             )
         elif self.config.lr_scheduler_name == "none":
-            lr_scheduler = None
+            self.lr_scheduler = None
         else:
             raise ValueError(
                 f'Learning rate scheduler "{self.config.lr_scheduler_name}" not supported'
             )
-
-        return optimizer, lr_scheduler
 
     def _setup_loss(self):
         if self.config.loss_name == "dice+ce":
@@ -831,6 +830,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info(f"  lr_scheduler: {self.config.lr_scheduler_name}")
         self.logger.info(f"  start_lr: {self.config.start_lr}")
         self.logger.info(f"  optimizer_kwargs: {self.config.optimizer_kwargs}")
+        self.logger.info(f"  instance: {self.optimizer}")
         self.logger.info(f"loss_fn: {self.config.loss_name}")
         self.logger.info(f"save_metric: {self.config.save_metric_name}")
         self.logger.info(
@@ -863,6 +863,7 @@ class ALTrainer(BaseTrainer):
             self.valid_dataloader,
         ) = self.get_data()
 
+        self._setup_optimizer()
         self._setup_loss()
         self._setup_active_selector()
 
@@ -969,9 +970,7 @@ class ALTrainer(BaseTrainer):
         self.current_iter = 0
         self.current_patience = 0
 
-        self.optimizer, self.lr_scheduler = self._get_optimizer(
-            self.model,
-        )
+        self._setup_optimizer()
 
         default_metric = torch.tensor(
             -torch.inf if self.config.maximum_save_metric else torch.inf
