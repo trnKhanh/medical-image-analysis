@@ -134,6 +134,7 @@ class ALConfig(object):
             "coreset-cosine",
             "badge",
         ] = "random",
+        coreset_criteria: Literal["min", "sum"] = "min",
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
@@ -211,6 +212,7 @@ class ALConfig(object):
         self.persist_model_weight = persist_model_weight
 
         self.active_selector_name = active_selector_name
+        self.coreset_criteria = coreset_criteria
         self.feature_path = feature_path
         self.loaded_feature_weight = loaded_feature_weight
         self.optimizer_name = optimizer_name
@@ -802,6 +804,7 @@ class ALTrainer(BaseTrainer):
                 metric="l2",
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
             )
         elif self.config.active_selector_name == "coreset-cosine":
             self.active_selector = CoresetSelector(
@@ -811,6 +814,7 @@ class ALTrainer(BaseTrainer):
                 metric="cosine",
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
             )
         elif self.config.active_selector_name == "badge":
             self.active_selector = BADGESelector(
@@ -877,6 +881,8 @@ class ALTrainer(BaseTrainer):
             f"persist_model_weight: {self.config.persist_model_weight}"
         )
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
+        if self.config.active_selector_name.startswith("coreset"):
+            self.logger.info(f"coreset_criteria: {self.config.coreset_criteria}")
         self.logger.info(f"feature_path: {self.config.feature_path}")
         self.logger.info(
             f"loaded_feature_weight: {self.config.loaded_feature_weight}"
@@ -1176,9 +1182,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info("Valid results (DSC, HD, ASD, JSD):")
         for id in classes.keys():
             if id == 0:
-                self.logger.info(
-                    f"  all: {avg_metric_all.tolist()}"
-                )
+                self.logger.info(f"  all: {avg_metric_all.tolist()}")
             else:
                 self.logger.info(
                     f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
@@ -1299,7 +1303,6 @@ class ALTrainer(BaseTrainer):
             sampled_batch["image"],
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
-
 
         image_batch, label_batch = image_batch.to(
             self.device, dtype=torch.float32
@@ -1472,7 +1475,6 @@ class ALTrainer(BaseTrainer):
                 pred == c, label_batch == c, spacing
             )
 
-
         return metric_all, metric_per_cls, loss
 
     def calculate_metric_percase(
@@ -1601,9 +1603,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info("Real test results (DSC, HD, ASD, JSD):")
         for id in classes.keys():
             if id == 0:
-                self.logger.info(
-                    f"  all: {avg_metric_all.tolist()}"
-                )
+                self.logger.info(f"  all: {avg_metric_all.tolist()}")
             else:
                 self.logger.info(
                     f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"

@@ -16,7 +16,7 @@ from datasets.active_dataset import ActiveDataset
 from utils import get_path
 
 
-def kcenter_greedy(dist_mat, n_data, budget, init_idx):
+def kcenter_greedy(dist_mat, n_data, budget, init_idx, coreset_criteria="min"):
     assert (
         dist_mat.shape[0] == n_data
     ), "Size of distance matrix and number of data doesn't match!"
@@ -30,7 +30,15 @@ def kcenter_greedy(dist_mat, n_data, budget, init_idx):
     for _ in tqdm(range(budget), desc="k-center greedy"):
         mat = dist_mat[~labeled_indices, :][:, labeled_indices]
         # for all the unselected points, find its nearest neighbor in selected points
-        mat_min = mat.min(axis=1)
+        if coreset_criteria == "min":
+            mat_min = mat.min(axis=1)
+        elif coreset_criteria == "sum":
+            mat_min = mat.sum(axis=1)
+        else:
+            raise RuntimeError(
+                f"coreset_criteria {coreset_criteria} is undefined"
+            )
+
         # find nearest neighbor with largest distance as the next selected point
         q_index_ = mat_min.argmax()
         q_index = all_indices[~labeled_indices][q_index_]
@@ -51,6 +59,7 @@ class CoresetSelector(ActiveSelector):
         pin_memory: bool = True,
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
+        coreset_criteria: Literal["sum", "min"] = "min",
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
     ) -> None:
@@ -60,6 +69,7 @@ class CoresetSelector(ActiveSelector):
         self.smooth = smooth
         self.metric = metric
         self.feature_path = get_path(feature_path) if feature_path else None
+        self.coreset_criteria = coreset_criteria
         self.loaded_feature_weight = loaded_feature_weight
 
     def cal_scores(
@@ -169,6 +179,7 @@ class CoresetSelector(ActiveSelector):
                 n_data=len(all_list),
                 budget=select_num,
                 init_idx=np.arange(len(core_list)),
+                coreset_criteria=self.coreset_criteria,
             )
 
             selected_samples = list(all_list[selected_sample_ids])
