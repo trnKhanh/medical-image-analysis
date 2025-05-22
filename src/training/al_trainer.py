@@ -16,7 +16,7 @@ import torch.nn.functional as N
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
 
-from medpy import metric
+from medpy import metric as medpy_metric
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,7 @@ from datasets import (
     ExtendableDataset,
     TN3KDataset,
     TG3KDataset,
+    FUGCDataset,
 )
 from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
@@ -42,7 +43,8 @@ from scheduler.lr_scheduler import PolyLRScheduler
 
 from utils import get_path, draw_mask, dummy_context
 
-from models.unet import UNet
+from models.unet import UNet, UnetProcessor
+from models._unet import _UNet
 
 from transforms.normalization import ZScoreNormalize
 from transforms.image_transform import (
@@ -77,6 +79,8 @@ from activelearning import (
     BADGESelector,
 )
 
+from metric import cal_hd
+
 
 class ALConfig(object):
     PROMPT_MODE = Literal[
@@ -93,9 +97,11 @@ class ALConfig(object):
         self,
         seed: int = 12345,
         init_round_path: str | Path | None = None,
+        init_data_list: str | Path | None = None,
         # Model parameters
         in_channels: int = 1,
         num_classes: int = 3,
+        postprocess_mask: bool = False,
         block_type: Literal["plain"] = "plain",
         block_normalization: Literal["batch", "instance"] = "batch",
         dropout_prob: float = 0.1,
@@ -105,11 +111,13 @@ class ALConfig(object):
         image_size: int | tuple[int, int] | None = None,
         model_ckpt: Path | str | None = None,
         # Data parameters
-        dataset: Literal["ACDC", "tn3k", "tg3k"] = "ACDC",
+        dataset: Literal["ACDC", "tn3k", "tg3k", "fugc"] = "ACDC",
         data_path: Path | str = "data",
+        do_oversample: bool = False,
         do_augment: bool = False,
         do_normalize: bool = False,
         batch_size: int = 32,
+        valid_batch_size: int = 1,
         num_workers: int = 1,
         pin_memory: bool = True,
         # Training parameters
@@ -154,10 +162,12 @@ class ALConfig(object):
 
         self.seed = seed
         self.init_round_path = init_round_path
+        self.init_data_list = init_data_list
 
         # >>> Model parameters
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.postprocess_mask = postprocess_mask
         self.block_type = block_type
         self.block_normalization = block_normalization
         self.dropout_prob = dropout_prob
@@ -180,9 +190,11 @@ class ALConfig(object):
         # >>> Data parameters
         self.dataset = dataset
         self.data_path = data_path
+        self.do_oversample = do_oversample
         self.do_augment = do_augment
         self.do_normalize = do_normalize
         self.batch_size = batch_size
+        self.valid_batch_size = valid_batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         # <<< Data parameters
@@ -252,7 +264,6 @@ class ALConfig(object):
 def _worker_init_fn(worker_id):
     seed = int(os.environ["AL_SEED"] or 0)
     seed = seed + worker_id
-    print(f"seed of worker {worker_id}: {seed}")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -484,6 +495,7 @@ class ALTrainer(BaseTrainer):
             dropout_prob=self.config.dropout_prob,
             normalization=self.config.block_normalization,
         )
+        self.model_processor = UnetProcessor(image_size=self.config.image_size)
 
         if self.config.model_ckpt:
             self.load_model_checkpoint(self.config.model_ckpt)
@@ -494,7 +506,10 @@ class ALTrainer(BaseTrainer):
 
         try:
             state_dict = torch.load(ckpt, map_location=self.device)
-            self.model.load_state_dict(state_dict)
+            if "model" in state_dict:
+                self.model.load_state_dict(state_dict["model"])
+            else:
+                self.model.load_state_dict(state_dict)
 
             self.logger.info(f"Loaded model checkpoint from {ckpt}")
         except Exception as e:
@@ -560,6 +575,16 @@ class ALTrainer(BaseTrainer):
                 image_channels=self.config.in_channels,
                 image_size=_image_size,
             )
+        elif self.config.dataset == "fugc":
+            dataset = FUGCDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
         else:
             raise ValueError(f"{self.config.dataset} dataset is undefined")
 
@@ -577,7 +602,7 @@ class ALTrainer(BaseTrainer):
 
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
-            batch_size=1,
+            batch_size=self.config.valid_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=1,
@@ -596,14 +621,15 @@ class ALTrainer(BaseTrainer):
         train_dataset = active_dataset.get_train_dataset()
         oversampled_dataset = deepcopy(train_dataset)
 
-        # If dataset is not enough for batch_size, we oversample it
-        # For some reasons, this implementation is extremely faster compared
-        # to just oversample to batch_size
-        total_seen_samples = self.config.num_iters * self.config.batch_size
-        num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
-        oversampled_dataset.image_idx = (
-            oversampled_dataset.image_idx * num_extended
-        )
+        if self.config.do_oversample:
+            # If dataset is not enough for batch_size, we oversample it
+            # For some reasons, this implementation is extremely faster compared
+            # to just oversample to batch_size
+            total_seen_samples = self.config.num_iters * self.config.batch_size
+            num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
+            oversampled_dataset.image_idx = (
+                oversampled_dataset.image_idx * num_extended
+            )
 
         train_dataloader = DataLoader(
             dataset=oversampled_dataset,
@@ -619,22 +645,51 @@ class ALTrainer(BaseTrainer):
     def _get_train_transform(self):
         transforms = []
         if self.config.do_augment:
-            transforms.append(
-                RandomTransform(
-                    ComposeTransform(
-                        [
-                            RandomRotation90(),
-                            RandomChoiceTransform(
-                                [MirrorTransform((-2)), MirrorTransform((-1))]
-                            ),
-                        ]
-                    ),
-                    p=0.5,
+            if self.config.dataset == "fugc":
+                transforms.append(
+                    RandomTransform(RandomAffine(scale=(0.7, 1.4)), p=0.2)
                 )
-            )
-            transforms.append(
-                RandomTransform(RandomAffine(degrees=(-20, 20)), p=0.5)
-            )
+                transforms.append(
+                    RandomTransform(RandomAffine(degrees=(-15, 15)), p=0.2)
+                )
+                transforms.append(
+                    RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
+                )
+                transforms.append(
+                    RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
+                )
+                transforms.append(
+                    RandomTransform(RandomBrightness(brightness=0.25), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(RandomContrast(contrast=0.25), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(RandomGamma(gamma=(0.7, 1.5)), p=0.1)
+                )
+            else:
+                transforms.append(
+                    RandomTransform(
+                        ComposeTransform(
+                            [
+                                RandomRotation90(),
+                                RandomChoiceTransform(
+                                    [
+                                        MirrorTransform((-2)),
+                                        MirrorTransform((-1)),
+                                    ]
+                                ),
+                            ]
+                        ),
+                        p=0.5,
+                    )
+                )
+                transforms.append(
+                    RandomTransform(RandomAffine(degrees=(-20, 20)), p=0.5)
+                )
 
         return ComposeTransform(transforms)
 
@@ -787,6 +842,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info(f"model: {self.model}")
         self.logger.info(f"  in_channels: {self.config.in_channels}")
         self.logger.info(f"  num_classes: {self.config.num_classes}")
+        self.logger.info(f"  postprocess_mask: {self.config.postprocess_mask}")
         self.logger.info(f"  block_type: {self.config.block_type}")
         self.logger.info(
             f"  block_normalization: {self.config.block_normalization}"
@@ -804,6 +860,7 @@ class ALTrainer(BaseTrainer):
             f"  active_dataset_size (slices): {self.active_dataset.get_size()}"
         )
         self.logger.info(f"  valid_size (volumns): {len(self.valid_dataset)}")
+        self.logger.info(f"  do_oversample: {self.config.do_oversample}")
         self.logger.info(f"  do_augment: {self.config.do_augment}")
         if self.config.do_augment:
             self.logger.info(
@@ -869,7 +926,6 @@ class ALTrainer(BaseTrainer):
 
         self.current_round = 0
 
-
         if self.config.maximum_save_metric is None:
             if self.config.save_metric_name == "dice":
                 self.config.maximum_save_metric = True
@@ -931,11 +987,17 @@ class ALTrainer(BaseTrainer):
                 self.load_model_checkpoint(last_ckpt)
 
         if self.config.active_learning:
-            new_samples = self.active_selector.select_next_batch(
-                self.active_dataset, self.config.budget, self.model, self.device
-            )
+            if self.current_round == 0 and self.config.init_data_list:
+                self.active_dataset.load_data_list(self.config.init_data_list)
+            else:
+                new_samples = self.active_selector.select_next_batch(
+                    self.active_dataset,
+                    self.config.budget,
+                    self.model,
+                    self.device,
+                )
 
-            self.active_dataset.extend_train_set(new_samples)
+                self.active_dataset.extend_train_set(new_samples)
         else:
             pool_samples = deepcopy(self.active_dataset.pool_dataset.image_idx)
             self.active_dataset.extend_train_set(pool_samples)
@@ -1087,33 +1149,42 @@ class ALTrainer(BaseTrainer):
             return old_metric > new_metric
 
     def on_valid_epoch_end(self):
-        metric = torch.cat(
-            [o["metric"][:, :] for o in self.epoch_valid_outputs], dim=0
+        avg_metric_all = torch.cat(
+            [o["metric_all"] for o in self.epoch_valid_outputs], dim=0
+        ).nanmean(0)
+        avg_metric_per_cls = torch.cat(
+            [o["metric"] for o in self.epoch_valid_outputs], dim=0
         ).nanmean(0)
         loss = torch.stack(
             [o["loss"] for o in self.epoch_valid_outputs]
         ).nanmean()
 
-        dsc_per_class = metric[:, 0]
+        dsc_per_class = avg_metric_per_cls[:, 0]
         avg_dsc = dsc_per_class.mean()
 
-        hd_per_class = metric[:, 1]
+        hd_per_class = avg_metric_per_cls[:, 1]
         avg_hd = hd_per_class.nanmean()
 
-        asd_per_class = metric[:, 2]
+        asd_per_class = avg_metric_per_cls[:, 2]
         avg_asd = asd_per_class.mean()
 
-        jc_per_class = metric[:, 3]
+        jc_per_class = avg_metric_per_cls[:, 3]
         avg_jc = jc_per_class.nanmean()
 
-        self.logger.info(f"DSC per class: {dsc_per_class.tolist()}")
-        self.logger.info(f"HD per class: {hd_per_class.tolist()}")
-        self.logger.info(f"ASD per class: {asd_per_class.tolist()}")
-        self.logger.info(f"JC per class: {jc_per_class.tolist()}")
-        self.logger.info(f"avg DSC: {avg_dsc.item()}")
-        self.logger.info(f"avg HD: {avg_hd.item()}")
-        self.logger.info(f"avg ASD: {avg_asd.item()}")
-        self.logger.info(f"avg JC: {avg_jc.item()}")
+        classes = self.valid_dataset.CLASSES
+
+        self.logger.info("Valid results (DSC, HD, ASD, JSD):")
+        for id in classes.keys():
+            if id == 0:
+                self.logger.info(
+                    f"  all: {avg_metric_all.tolist()}"
+                )
+            else:
+                self.logger.info(
+                    f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
+                )
+
+        self.logger.info(f"Average: {avg_metric_per_cls.nanmean(0).tolist()}")
         self.logger.info(f"loss: {loss.item()}")
 
         if self.config.save_metric_name == "dice":
@@ -1130,7 +1201,7 @@ class ALTrainer(BaseTrainer):
         if self.use_wandb:
             valid_metric = {
                 f"round_{self.current_round}/valid/metric/dsc": avg_dsc.item(),
-                f"round_{self.current_round}/valid/metric/hd95": avg_hd.item(),
+                f"round_{self.current_round}/valid/metric/hd": avg_hd.item(),
                 f"round_{self.current_round}/valid/metric/loss": loss.item(),
                 f"round_{self.current_round}_train_epoch": self.current_epoch,
                 f"round_{self.current_round}_train_iter": self.current_iter,
@@ -1229,6 +1300,7 @@ class ALTrainer(BaseTrainer):
             sampled_batch["label"],
         )  #  [b, c, h, w], [b, h, w]
 
+
         image_batch, label_batch = image_batch.to(
             self.device, dtype=torch.float32
         ), label_batch.to(self.device, dtype=torch.long)
@@ -1266,12 +1338,13 @@ class ALTrainer(BaseTrainer):
 
     def valid_step(self, sampled_batch):
         if self.config.valid_mode == "volumn":
-            metric, loss = self.valid_volumns(sampled_batch)
+            metric_all, metric, loss = self.valid_volumns(sampled_batch)
         else:
-            metric, loss = self.valid_slices(sampled_batch)
+            metric_all, metric, loss = self.valid_slices(sampled_batch)
 
         self.epoch_valid_outputs.append(
             {
+                "metric_all": torch.Tensor(metric_all),
                 "metric": torch.Tensor(metric),
                 "loss": loss,
             }
@@ -1289,23 +1362,13 @@ class ALTrainer(BaseTrainer):
             self.device
         )
 
-        if self.config.image_size is not None:
-            image_batch = F.resize(
-                image_batch,
-                list(self.config.image_size),
-                interpolation=F.InterpolationMode.BILINEAR,
-            )
+        image_batch = self.model_processor.preprocess(image_batch)
 
         output = self.model(image_batch)
         prob = output.softmax(1)
         pred = prob.argmax(1)
 
         if pred.shape[-2:] != label_batch.shape[-2:]:
-            pred = F.resize(
-                pred,
-                size=label_batch.shape[-2:],
-                interpolation=F.InterpolationMode.NEAREST,
-            )
             loss_label_batch = F.resize(
                 label_batch,
                 size=output.shape[-2:],
@@ -1313,6 +1376,12 @@ class ALTrainer(BaseTrainer):
             )
         else:
             loss_label_batch = label_batch
+
+        pred = self.model_processor.postprocess(
+            pred,
+            label_batch.shape[-2:],
+            do_denoise=self.config.postprocess_mask,
+        )
 
         if hasattr(self, "supervised_loss"):
             loss = self.supervised_loss(output, loss_label_batch)
@@ -1322,7 +1391,8 @@ class ALTrainer(BaseTrainer):
         pred = pred.cpu().numpy()
         label_batch = label_batch.cpu().numpy()
 
-        metric = np.zeros((B, self.config.num_classes, 4))
+        metric_all = np.zeros((B, 4))
+        metric_per_cls = np.zeros((B, self.config.num_classes, 4))
 
         if "spacing" in sampled_batch:
             spacing = sampled_batch["spacing"][0]
@@ -1331,12 +1401,15 @@ class ALTrainer(BaseTrainer):
             spacing = None
 
         for b in range(B):
+            metric_all[b] = self.calculate_metric_percase(
+                pred[b] > 0, label_batch[b] > 0, spacing
+            )
             for c in range(1, self.config.num_classes + 1):
-                metric[b, c - 1] = self.calculate_metric_percase(
+                metric_per_cls[b, c - 1] = self.calculate_metric_percase(
                     pred[b] == c, label_batch[b] == c, spacing
                 )
 
-        return metric, loss
+        return metric_all, metric_per_cls, loss
 
     def valid_volumns(self, sampled_batch):
         image_batch, label_batch = (
@@ -1352,23 +1425,13 @@ class ALTrainer(BaseTrainer):
         image_batch = image_batch.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
         label_batch = label_batch.squeeze(0)  # D, H, W
 
-        if self.config.image_size is not None:
-            image_batch = F.resize(
-                image_batch,
-                list(self.config.image_size),
-                interpolation=F.InterpolationMode.BILINEAR,
-            )
+        image_batch = self.model_processor.preprocess(image_batch)
 
         output = self.model(image_batch)
         prob = output.softmax(1)
         pred = prob.argmax(1)
 
         if pred.shape[-2:] != label_batch.shape[-2:]:
-            pred = F.resize(
-                pred,
-                size=label_batch.shape[-2:],
-                interpolation=F.InterpolationMode.NEAREST,
-            )
             loss_label_batch = F.resize(
                 label_batch,
                 size=output.shape[-2:],
@@ -1376,6 +1439,12 @@ class ALTrainer(BaseTrainer):
             )
         else:
             loss_label_batch = label_batch
+
+        pred = self.model_processor.postprocess(
+            pred,
+            label_batch.shape[-2:],
+            do_denoise=self.config.postprocess_mask,
+        )
 
         if hasattr(self, "supervised_loss"):
             loss = self.supervised_loss(output, loss_label_batch)
@@ -1385,7 +1454,8 @@ class ALTrainer(BaseTrainer):
         pred = pred.cpu().numpy()
         label_batch = label_batch.cpu().numpy()
 
-        metric = np.zeros((1, self.config.num_classes, 4))
+        metric_all = np.zeros((1, 4))
+        metric_per_cls = np.zeros((1, self.config.num_classes, 4))
 
         if "spacing" in sampled_batch:
             spacing = sampled_batch["spacing"][0]
@@ -1393,12 +1463,17 @@ class ALTrainer(BaseTrainer):
         else:
             spacing = None
 
+        metric_all[0] = self.calculate_metric_percase(
+            pred > 0, label_batch > 0, spacing
+        )
+
         for c in range(1, self.config.num_classes + 1):
-            metric[0, c - 1] = self.calculate_metric_percase(
+            metric_per_cls[0, c - 1] = self.calculate_metric_percase(
                 pred == c, label_batch == c, spacing
             )
 
-        return metric, loss
+
+        return metric_all, metric_per_cls, loss
 
     def calculate_metric_percase(
         self, pred: np.ndarray, gt: np.ndarray, spacing=None
@@ -1407,17 +1482,17 @@ class ALTrainer(BaseTrainer):
         gt[gt > 0] = 1
 
         dice = 0
-        hd95 = np.nan
+        hd = np.nan
         asd = np.nan
         jc = 0
 
         if pred.sum() > 0:
-            dice = metric.dc(pred, gt)
-            hd95 = metric.hd95(pred, gt, spacing)
-            asd = metric.asd(pred, gt, spacing)
-            jc = metric.jc(pred, gt)
+            dice = medpy_metric.dc(pred, gt)
+            hd = cal_hd(pred, gt, spacing)
+            asd = medpy_metric.asd(pred, gt, spacing)
+            jc = medpy_metric.jc(pred, gt)
 
-        return dice, hd95, asd, jc
+        return dice, hd, asd, jc
 
     def train(self):
         self.on_train_start()
@@ -1469,39 +1544,48 @@ class ALTrainer(BaseTrainer):
 
         test_dataloader = DataLoader(
             dataset=test_dataset,
-            batch_size=1,
+            batch_size=self.config.valid_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=1,
             pin_memory=True,
         )
 
+        metric_all_list = []
         metric_list = []
 
         for sampled_batch in tqdm(test_dataloader):
             if self.config.valid_mode == "volumn":
-                metric, _ = self.valid_volumns(sampled_batch)
+                metric_all, metric, _ = self.valid_volumns(sampled_batch)
             else:
-                metric, _ = self.valid_slices(sampled_batch)
+                metric_all, metric, _ = self.valid_slices(sampled_batch)
 
+            metric_all_list.extend(metric_all)
             metric_list.extend(metric)
 
+        metric_all_tensor = torch.from_numpy(
+            np.array(metric_all_list)
+        )  # N, C, 4 (DSC, HD, ASD, JSD)
         metric_tensor = torch.from_numpy(
             np.array(metric_list)
         )  # N, C, 4 (DSC, HD, ASD, JSD)
         classes = test_dataset.CLASSES
-        metric_name = {0: "DSC", 1: "HD95", 2: "ASD", 3: "JSD"}
+        metric_name = {0: "DSC", 1: "HD", 2: "ASD", 3: "JSD"}
 
         dataframe_dict = {}
         for class_id in classes.keys():
             if class_id == 0:
-                continue
-
-            for metric_id in metric_name.keys():
-                field_name = f"{classes[class_id]}-{metric_name[metric_id]}"
-                dataframe_dict[field_name] = metric_tensor[
-                    :, class_id - 1, metric_id
-                ].tolist()
+                for metric_id in metric_name.keys():
+                    field_name = f"all-{metric_name[metric_id]}"
+                    dataframe_dict[field_name] = metric_all_tensor[
+                        :, metric_id
+                    ].tolist()
+            else:
+                for metric_id in metric_name.keys():
+                    field_name = f"{classes[class_id]}-{metric_name[metric_id]}"
+                    dataframe_dict[field_name] = metric_tensor[
+                        :, class_id - 1, metric_id
+                    ].tolist()
 
         if self.use_wandb:
             wandb_table = wandb.Table(
@@ -1512,15 +1596,18 @@ class ALTrainer(BaseTrainer):
                 {f"test_performance_round_{self.current_round}": wandb_table}
             )
 
+        avg_metric_all = metric_all_tensor.nanmean(0)
         avg_metric_per_cls = metric_tensor.nanmean(0)
-        self.logger.info("Real test results:")
+        self.logger.info("Real test results (DSC, HD, ASD, JSD):")
         for id in classes.keys():
             if id == 0:
-                continue
-
-            self.logger.info(
-                f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
-            )
+                self.logger.info(
+                    f"  all: {avg_metric_all.tolist()}"
+                )
+            else:
+                self.logger.info(
+                    f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
+                )
 
         self.logger.info(f"Average: {avg_metric_per_cls.nanmean(0).tolist()}")
 
@@ -1531,8 +1618,10 @@ class ALTrainer(BaseTrainer):
             avg_asd = avg_metric[2]
             avg_jc = avg_metric[3]
             test_metric = {
+                f"test/metric/dsc_all": avg_metric_all[0].item(),
+                f"test/metric/hd_all": avg_metric_all[1].item(),
                 f"test/metric/dsc": avg_dsc.item(),
-                f"test/metric/hd95": avg_hd.item(),
+                f"test/metric/hd": avg_hd.item(),
                 f"test/metric/asd": avg_asd.item(),
                 f"test/metric/jc": avg_jc.item(),
                 f"round_step": self.current_round,

@@ -1,5 +1,4 @@
-from copy import deepcopy
-from typing import Callable, Dict, List, Literal
+from typing import Callable, Literal, Any
 from pathlib import Path
 from logging import Logger
 import json
@@ -9,139 +8,157 @@ import torchvision.transforms.functional as F
 from PIL import Image
 
 from datasets.basedataset import BaseDataset
-from datasets.utils.logging import (
-    log_no_split_dict,
-    log_not_found_split_dict,
-    log_not_found_split_dict_key,
-    log_not_found_label,
-)
-from datasets.utils.exceptions import SplitDictKeyException
+from transforms.joint_transform import JointResize
 from utils import get_path
 
 
 class FUGCDataset(BaseDataset):
-    images_dir = "images"
-    labels_dir = "labels"
+    CLASSES = {0: "bg", 1: "anterior lip", 2: "posterior lip"}
+
+    TRAIN_DIR = "train"
+    VALID_DIR = "val"
+    TEST_DIR = "test"
+
+    IMAGES_DIR = "images"
+    LABELS_DIR = "labels"
+
+    NUM_CLASSES = 2
 
     @staticmethod
     def find_samples(
         data_path: Path | str, require_label: bool = True
     ) -> list[dict]:
-        """Return the samples' id from the data_path"""
         data_path = get_path(data_path)
-        images_dir_path = data_path / FUGCDataset.images_dir
-        labels_dir_path = data_path / FUGCDataset.labels_dir
+        images_dir = data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.IMAGES_DIR
+        labels_dir = data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.LABELS_DIR
+        samples_list = []
+        for image_path in images_dir.glob("*.png"):
+            if not image_path.is_file():
+                continue
 
-        samples = []
-        for image_path in images_dir_path.glob("*.png"):
-            image_id = image_path.stem
+            sample_id = image_path.stem
 
-            if require_label:
-                try:
-                    next(labels_dir_path.glob(f"{image_id}.*"))
-                except StopIteration:
-                    continue
+            label_path = labels_dir / image_path.name
 
-            samples.append({"id": image_id, "path": image_path.resolve()})
+            labeled = label_path.is_file()
 
-        return samples
+            if require_label and not labeled:
+                continue
+
+            samples_list.append(
+                {
+                    "id": sample_id,
+                    "image_path": image_path.resolve(),
+                    "label_path": label_path.resolve(),
+                    "labeled": labeled,
+                }
+            )
+
+        return samples_list
 
     def __init__(
         self,
         data_path: Path | str,
-        transform: Callable | None = None,
+        split: Literal["train", "valid", "test"] = "train",
+        fold: int = 0,
         normalize: Callable | None = None,
-        split: Literal["train", "valid"] = "train",
-        split_dict: Dict | Path | str | None = None,
+        transform: Callable | None = None,
         logger: Logger | None = None,
-        oversample: int = 1,
+        image_channels: int = 3,
+        image_size: int | tuple[int, int] | None = None,
     ):
         self.data_path = get_path(data_path)
-        self.transform = transform
-        self.normalize = normalize
         self.split = split
-        self.oversample = oversample
+        self.fold = fold
+        self.normalize = normalize
+        self.transform = transform
         self.logger = logger
+        self.image_channels = image_channels
+        self.image_size = image_size
 
-        if isinstance(split_dict, (str, Path)):
-            split_path = get_path(split_dict)
-            try:
-                with open(split_path, "r") as f:
-                    split_dict = dict(json.load(f))
-            except Exception as e:
-                if self.logger:
-                    log_not_found_split_dict(self.logger, split_path, e)
-                split_dict = None
+        self.final_transform = self._get_final_transform()
 
-        if split_dict:
-            if split not in split_dict:
-                if self.logger:
-                    log_not_found_split_dict_key(self.logger, split)
-                raise SplitDictKeyException(split)
-        elif self.logger:
-            log_no_split_dict(self.logger)
-
-        self.split_dict = split_dict
+        self.samples_list = []
 
         self._register_samples()
 
+    def _get_final_transform(self):
+        if self.image_size is None:
+            return None
+        else:
+            return JointResize(self.image_size)
+
+    def _register_samples(self):
+        if self.split == "train":
+            images_path = (
+                self.data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.IMAGES_DIR
+            )
+        elif self.split == "valid":
+            images_path = (
+                self.data_path / FUGCDataset.VALID_DIR / FUGCDataset.IMAGES_DIR
+            )
+        elif self.split == "test":
+            images_path = (
+                self.data_path / FUGCDataset.TEST_DIR / FUGCDataset.IMAGES_DIR
+            )
+        else:
+            raise ValueError(f"FUGCDataset does not have {self.split} split")
+
+        self.samples_list = [
+            sample_path.stem for sample_path in images_path.glob("*.png")
+        ]
+
     def __len__(self):
-        return len(self.samples)
+        return len(self.samples_list)
 
     def __getitem__(self, index):
         return self.get_sample(index)
 
-    def get_sample(self, index: int, normalize: bool = True):
-        sample = self.samples[index]
-        image_path = sample["image"]
-        label_path = sample["label"]
+    def get_sample(self, index: int, normalize: bool = True) -> Any:
+        case = self.samples_list[index]
+        
+        if self.split == "train":
+            split_dir = FUGCDataset.TRAIN_DIR
+        elif self.split == "valid":
+            split_dir = FUGCDataset.VALID_DIR
+        else:
+            split_dir = FUGCDataset.TEST_DIR
 
-        image = Image.open(image_path).convert("RGB")
-        label = F.pil_to_tensor(Image.open(label_path)).to(dtype=torch.int32)
+        image_path = (
+            self.data_path
+            / split_dir
+            / FUGCDataset.IMAGES_DIR
+            / f"{case}.png"
+        )
+        label_path = (
+            self.data_path
+            / split_dir
+            / FUGCDataset.LABELS_DIR
+            / f"{case}.png"
+        )
 
-        data = {
-            "image": image,
-            "label": label,
-        }
+        image_pil = Image.open(image_path).convert("L")
+        label_pil = Image.open(label_path)
+
+        image = F.to_tensor(image_pil)
+        label = F.pil_to_tensor(label_pil)
+        label = label.long()
+
+        image = image.repeat(self.image_channels // image.shape[0], 1, 1)
+
+        data: dict = {"image": image, "label": label}
 
         if self.transform:
             data = self.transform(data)
 
+        if self.final_transform:
+            data = self.final_transform(data)
+
         if self.normalize and normalize:
             data = self.normalize(data)
 
-        if not isinstance(image, torch.Tensor):
-            image = F.to_tensor(image)
+        data["label"] = data["label"].squeeze(0)
 
+        data["case_name"] = case
 
         return data
-
-    def get_image_path(self, index):
-        return self.samples[index]["image"]
-
-    def _register_samples(self):
-        images_dir_path = self.data_path / FUGCDataset.images_dir
-        labels_dir_path = self.data_path / FUGCDataset.labels_dir
-
-        self.samples: List[Dict[str, Path]] = []
-        for image_path in images_dir_path.glob("*.png"):
-            image_id = image_path.stem
-
-            if self.split_dict and image_id not in self.split_dict[self.split]:
-                continue
-
-            try:
-                label_path = next(labels_dir_path.glob(f"{image_id}.*"))
-            except StopIteration:
-                if self.logger:
-                    log_not_found_label(
-                        self.logger, image_path.name, image_path
-                    )
-                continue
-
-            self.samples.append({"image": image_path, "label": label_path})
-
-        oversampled_samples = []
-        for _ in range(self.oversample):
-            oversampled_samples.extend(deepcopy(self.samples))
-        self.samples = oversampled_samples

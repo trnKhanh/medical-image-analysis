@@ -1,8 +1,10 @@
+from typing import Union
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as N
+import torchvision.transforms.functional as F
 
-from typing import Union
 from .blocks import PlainBlock, ResidualBlock, Upsample
 
 conv_dict = {
@@ -87,7 +89,7 @@ class UNetEncoder(nn.Module):
     def get_feature(self, x):
         B = x.shape[0]
         bottleneck_feat = self.forward(x, return_skips=False)  # [B, C, H, W]
-        feat = F.adaptive_avg_pool2d(bottleneck_feat, (1, 1)).view(
+        feat = N.adaptive_avg_pool2d(bottleneck_feat, (1, 1)).view(
             B, -1
         )  # [B, C]
         return feat

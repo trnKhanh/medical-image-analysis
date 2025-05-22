@@ -27,7 +27,9 @@ class HD(nn.Module):
         label_data_upper[label_data_upper == 2] = 0
         # label_upper = sitk.GetImageFromArray(label_data_upper)
 
-        result["hd_upper"] = float(self.cal_hd(pred_data_upper, label_data_upper))
+        result["hd_upper"] = float(
+            self.cal_hd(pred_data_upper, label_data_upper)
+        )
 
         # 计算lower指标
         pred_data_lower = sitk.GetArrayFromImage(pred)
@@ -40,7 +42,7 @@ class HD(nn.Module):
         label_data_lower[label_data_lower == 2] = 1
         # label_lower = sitk.GetImageFromArray(label_data_lower)
 
-        result["hd_lower"] = float(self.cal_hd(pred_data_lower, label_data_lower))
+        result["hd_lower"] = float(cal_hd(pred_data_lower, label_data_lower))
 
         # 计算总体指标
         pred_data_all = sitk.GetArrayFromImage(pred)
@@ -51,7 +53,7 @@ class HD(nn.Module):
         label_data_all[label_data_all == 2] = 1
         # label_all = sitk.GetImageFromArray(label_data_all)
 
-        result["hd_all"] = float(self.cal_hd(pred_data_all, label_data_all))
+        result["hd_all"] = float(cal_hd(pred_data_all, label_data_all))
 
         return (result["hd_all"] + result["hd_lower"] + result["hd_upper"]) / 3
 
@@ -76,23 +78,31 @@ class HD(nn.Module):
 
         return result
 
-    def cal_hd(self, a, b):
-        try:
-            sum_a = np.sum(a)
-            sum_b = np.sum(b)
-            if sum_a == 0 and sum_b == 0:
-                return 0.0
-            elif sum_a == 0 or sum_b == 0:
-                return np.inf
 
-            a = sitk.GetImageFromArray(a)
-            b = sitk.GetImageFromArray(b)
+def cal_hd(a_np: np.ndarray, b_np: np.ndarray, spacing=None):
+    try:
+        a_np = a_np.astype(np.int32)
+        b_np = b_np.astype(np.int32)
 
-            a = sitk.Cast(sitk.RescaleIntensity(a), sitk.sitkUInt8)
-            b = sitk.Cast(sitk.RescaleIntensity(b), sitk.sitkUInt8)
-            filter1 = sitk.HausdorffDistanceImageFilter()
-            filter1.Execute(a, b)
-            hd = filter1.GetHausdorffDistance()
-            return hd
-        except:
+        sum_a = np.sum(a_np)
+        sum_b = np.sum(b_np)
+        if sum_a == 0 and sum_b == 0:
+            return 0.0
+        elif sum_a == 0 or sum_b == 0:
             return np.inf
+
+        a = sitk.GetImageFromArray(a_np)
+        if spacing:
+            a.SetSpacing(spacing)
+        b = sitk.GetImageFromArray(b_np)
+        if spacing:
+            b.SetSpacing(spacing)
+
+        a = sitk.Cast(sitk.RescaleIntensity(a), sitk.sitkUInt8)
+        b = sitk.Cast(sitk.RescaleIntensity(b), sitk.sitkUInt8)
+        filter1 = sitk.HausdorffDistanceImageFilter()
+        filter1.Execute(a, b)
+        hd = filter1.GetHausdorffDistance()
+        return hd
+    except:
+        return np.inf
