@@ -143,6 +143,7 @@ class ALConfig(object):
         num_iters: int = 4000,
         start_lr: float = 1e-3,
         lr_scheduler_name: Literal["poly", "none"] = "poly",
+        lr_interval: int = 1,
         lr_warmup_iter: int = 5000,
         save_freq_epoch: int | None = None,
         valid_freq_iter: int = 200,
@@ -221,6 +222,7 @@ class ALConfig(object):
         self.num_iters = num_iters
         self.start_lr = start_lr
         self.lr_scheduler_name = lr_scheduler_name
+        self.lr_interval = lr_interval
         self.lr_warmup_iter = lr_warmup_iter
         self.save_freq_epoch = save_freq_epoch
         self.valid_freq_iter = valid_freq_iter
@@ -744,9 +746,10 @@ class ALTrainer(BaseTrainer):
         if self.config.lr_scheduler_name == "poly":
             self.lr_scheduler = PolyLRScheduler(
                 self.optimizer,
-                self.config.start_lr,
-                self.config.num_iters,
-                self.config.lr_warmup_iter,
+                initial_lr=self.config.start_lr,
+                max_steps=self.config.num_iters,
+                warmup_steps=self.config.lr_warmup_iter,
+                interval=self.config.lr_interval,
             )
         elif self.config.lr_scheduler_name == "none":
             self.lr_scheduler = None
@@ -882,7 +885,9 @@ class ALTrainer(BaseTrainer):
         )
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
         if self.config.active_selector_name.startswith("coreset"):
-            self.logger.info(f"coreset_criteria: {self.config.coreset_criteria}")
+            self.logger.info(
+                f"coreset_criteria: {self.config.coreset_criteria}"
+            )
         self.logger.info(f"feature_path: {self.config.feature_path}")
         self.logger.info(
             f"loaded_feature_weight: {self.config.loaded_feature_weight}"

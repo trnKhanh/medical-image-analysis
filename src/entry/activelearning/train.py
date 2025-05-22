@@ -60,6 +60,7 @@ def parse_args():
     parser.add_argument("--num-iters", default=4000, type=int)
     parser.add_argument("--start-lr", default=1e-3, type=float)
     parser.add_argument("--lr-scheduler", default="poly", type=str)
+    parser.add_argument("--lr-interval", default=1, type=int)
     parser.add_argument("--lr-warmup-iter", default=250, type=int)
     parser.add_argument("--save-freq-epoch", default=None, type=int)
     parser.add_argument("--valid-freq-iter", default=200, type=int)
