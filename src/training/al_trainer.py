@@ -76,6 +76,7 @@ from activelearning import (
     ConfidenceSelector,
     MarginSelector,
     CoresetSelector,
+    KMeanSelector,
     BADGESelector,
 )
 
@@ -132,9 +133,12 @@ class ALConfig(object):
             "margin",
             "coreset-l2",
             "coreset-cosine",
+            "kmean-l2",
+            "kmean-cosine",
             "badge",
         ] = "random",
         coreset_criteria: Literal["min", "sum"] = "min",
+        kmean_sample_weight: float = 1.0,
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
@@ -214,6 +218,7 @@ class ALConfig(object):
 
         self.active_selector_name = active_selector_name
         self.coreset_criteria = coreset_criteria
+        self.kmean_sample_weight = kmean_sample_weight
         self.feature_path = feature_path
         self.loaded_feature_weight = loaded_feature_weight
         self.optimizer_name = optimizer_name
@@ -818,6 +823,28 @@ class ALTrainer(BaseTrainer):
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
+            )
+        elif self.config.active_selector_name == "kmean-l2":
+            self.active_selector = KMeanSelector(
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                metric="l2",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                sample_weight_scale=self.config.kmean_sample_weight,
+            )
+        elif self.config.active_selector_name == "kmean-cosine":
+            self.active_selector = KMeanSelector(
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                metric="cosine",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                sample_weight_scale=self.config.kmean_sample_weight,
             )
         elif self.config.active_selector_name == "badge":
             self.active_selector = BADGESelector(
