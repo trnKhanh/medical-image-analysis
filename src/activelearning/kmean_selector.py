@@ -26,7 +26,7 @@ class KMeanSelector(ActiveSelector):
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
         feature_path: Path | str | None = None,
         coreset_criteria: Literal["sum", "min"] = "min",
-        loaded_feature_weight: float = 0.0,
+        loaded_feature_weight: float = 1.0,
         sample_weight_scale: float = 1.0,
     ) -> None:
         self.batch_size = batch_size
@@ -78,20 +78,25 @@ class KMeanSelector(ActiveSelector):
                     loaded_feat_list.append(loaded_feat)
 
         total_feat_list = []
-        if len(loaded_feat_list):
-            loaded_feats = np.stack(loaded_feat_list, axis=0)
-            if self.loaded_feature_weight:
-                total_feat_list.append(
-                    loaded_feats * np.sqrt(self.loaded_feature_weight)
-                )
-        else:
-            loaded_feats = None
 
         if len(feat_list):
             feats = np.concatenate(feat_list, axis=0)
             total_feat_list.append(feats)
         else:
             feats = None
+
+        if len(loaded_feat_list):
+            loaded_feats = np.stack(loaded_feat_list, axis=0)
+            if feats is None:
+                scale_factor = 1
+            else:
+                D1 = feats.shape[-1]
+                D2 = loaded_feats.shape[-1]
+                scale_factor = np.sqrt(D1 / D2 * self.loaded_feature_weight)
+
+            total_feat_list.append(loaded_feats * scale_factor)
+        else:
+            loaded_feats = None
 
         total_feats = np.concatenate(total_feat_list, axis=1)
 
@@ -109,7 +114,7 @@ class KMeanSelector(ActiveSelector):
         pool_feats, pool_case_names = self.get_features(
             pool_dataset, model, device
         )
-        
+
         if labeled_size > 0:
             labeled_dataset = active_dataset.get_train_dataset()
             labeled_feats, labeled_case_names = self.get_features(
@@ -148,9 +153,13 @@ class KMeanSelector(ActiveSelector):
 
         if pool2labeled_dist_mat is not None:
             if self.coreset_criteria == "min":
-                sample_weight = pool2labeled_dist_mat.min(axis=1) * self.sample_weight_scale
+                sample_weight = (
+                    pool2labeled_dist_mat.min(axis=1) * self.sample_weight_scale
+                )
             else:
-                sample_weight = pool2labeled_dist_mat.sum(axis=1) * self.sample_weight_scale
+                sample_weight = (
+                    pool2labeled_dist_mat.sum(axis=1) * self.sample_weight_scale
+                )
         else:
             sample_weight = None
 
