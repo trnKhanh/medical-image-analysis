@@ -141,6 +141,7 @@ class ALConfig(object):
         kmean_sample_weight: float = 1.0,
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
+        loaded_feature_only: bool = False,
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
@@ -221,6 +222,7 @@ class ALConfig(object):
         self.kmean_sample_weight = kmean_sample_weight
         self.feature_path = feature_path
         self.loaded_feature_weight = loaded_feature_weight
+        self.loaded_feature_only = loaded_feature_only
         self.optimizer_name = optimizer_name
         self.optimizer_kwargs = optimizer_kwargs
         self.grad_norm = grad_norm
@@ -834,6 +836,7 @@ class ALTrainer(BaseTrainer):
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
                 sample_weight_scale=self.config.kmean_sample_weight,
+                loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "kmean-cosine":
             self.active_selector = KMeanSelector(
@@ -845,6 +848,7 @@ class ALTrainer(BaseTrainer):
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
                 sample_weight_scale=self.config.kmean_sample_weight,
+                loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "badge":
             self.active_selector = BADGESelector(

@@ -27,6 +27,7 @@ class KMeanSelector(ActiveSelector):
         feature_path: Path | str | None = None,
         coreset_criteria: Literal["sum", "min"] = "min",
         loaded_feature_weight: float = 1.0,
+        loaded_feature_only: bool = False,
         sample_weight_scale: float = 1.0,
     ) -> None:
         self.batch_size = batch_size
@@ -37,6 +38,7 @@ class KMeanSelector(ActiveSelector):
         self.feature_path = get_path(feature_path) if feature_path else None
         self.coreset_criteria = coreset_criteria
         self.loaded_feature_weight = loaded_feature_weight
+        self.loaded_feature_only = loaded_feature_only
         self.sample_weight_scale = sample_weight_scale
 
     def get_features(
@@ -59,7 +61,7 @@ class KMeanSelector(ActiveSelector):
             case_name = sampled_batch["case_name"]
             case_name_list.extend(case_name)
 
-            if model:
+            if model and not self.loaded_feature_only:
                 model.eval()
                 with torch.no_grad():
                     feat = model.get_enc_feature(image_batch)
@@ -79,7 +81,7 @@ class KMeanSelector(ActiveSelector):
 
         total_feat_list = []
 
-        if len(feat_list):
+        if len(feat_list) and not self.loaded_feature_only:
             feats = np.concatenate(feat_list, axis=0)
             total_feat_list.append(feats)
         else:
@@ -162,9 +164,6 @@ class KMeanSelector(ActiveSelector):
                 )
         else:
             sample_weight = None
-
-        print(sample_weight)
-        print(sample_weight.shape)
 
         _, selected_indices = kmeans_plusplus(
             X=pool_feats, n_clusters=select_num, sample_weight=sample_weight
