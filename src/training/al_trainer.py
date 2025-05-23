@@ -1096,11 +1096,18 @@ class ALTrainer(BaseTrainer):
                 ckpt_path,
                 name=f"model_{self.wandb_runner.id}",
                 aliases=[
-                    f"epoch_{self.current_epoch}",
-                    "final",
                     f"round_{self.current_round}",
                 ],
             )
+            if self.use_wandb:
+                self.wandb_runner.log_model(
+                    ckpt_path,
+                    name=f"best_model_{self.wandb_runner.id}",
+                    aliases=[
+                        f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
+                        f"round_{self.current_round}",
+                    ],
+                )
 
         self.load_model_checkpoint(
             self.work_path / f"round_{self.current_round}/best_model/model.pth"
@@ -1271,16 +1278,6 @@ class ALTrainer(BaseTrainer):
             )
             self.save_state_dict(ckpt_path)
 
-            if self.use_wandb:
-                self.wandb_runner.log_model(
-                    ckpt_path,
-                    name=f"best_model_{self.wandb_runner.id}",
-                    aliases=[
-                        f"iter_{self.current_iter}",
-                        f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
-                        f"round_{self.current_round}",
-                    ],
-                )
             is_improved = True
 
         if is_improved:
