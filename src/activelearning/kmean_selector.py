@@ -163,6 +163,9 @@ class KMeanSelector(ActiveSelector):
         else:
             sample_weight = None
 
+        print(sample_weight)
+        print(sample_weight.shape)
+
         _, selected_indices = kmeans_plusplus(
             X=pool_feats, n_clusters=select_num, sample_weight=sample_weight
         )
