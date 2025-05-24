@@ -915,9 +915,14 @@ class ALTrainer(BaseTrainer):
             f"persist_model_weight: {self.config.persist_model_weight}"
         )
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
-        if self.config.active_selector_name.startswith("coreset"):
+        if self.config.active_selector_name.startswith(
+            "coreset"
+        ) or self.config.active_selector_name.startswith("kmean"):
             self.logger.info(
                 f"coreset_criteria: {self.config.coreset_criteria}"
+            )
+            self.logger.info(
+                f"kmean_sharp_factor: {self.config.kmean_sharp_factor}"
             )
         self.logger.info(f"feature_path: {self.config.feature_path}")
         self.logger.info(
