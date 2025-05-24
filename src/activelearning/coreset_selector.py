@@ -153,7 +153,15 @@ class CoresetSelector(ActiveSelector):
         device: torch.device,
     ):
         labeled_size, pool_size = active_dataset.get_size()
-        if labeled_size == 0:
+        if labeled_size == 0 and self.loaded_feature_weight == 0:
+            scores = torch.rand(pool_size)
+
+            _, indices = torch.sort(scores, descending=True)
+            selected_samples = [
+                active_dataset.pool_dataset.image_idx[id]
+                for id in indices[:select_num]
+            ]
+        elif labeled_size == 0:
             if self.feature_path:
                 core_list, all_list, loaded_feats, feats, feat_dist_mat = (
                     self.cal_scores(active_dataset, None, device)
