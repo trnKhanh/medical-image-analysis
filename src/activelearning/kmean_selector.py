@@ -25,10 +25,11 @@ class KMeanSelector(ActiveSelector):
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
         feature_path: Path | str | None = None,
-        coreset_criteria: Literal["sum", "min"] = "min",
+        coreset_criteria: Literal["mean", "min"] = "min",
         loaded_feature_weight: float = 1.0,
         loaded_feature_only: bool = False,
-        sample_weight_scale: float = 1.0,
+        sharp_factor: float = 1.0,
+        softmax: bool = False,
     ) -> None:
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -39,7 +40,8 @@ class KMeanSelector(ActiveSelector):
         self.coreset_criteria = coreset_criteria
         self.loaded_feature_weight = loaded_feature_weight
         self.loaded_feature_only = loaded_feature_only
-        self.sample_weight_scale = sample_weight_scale
+        self.sharp_factor = sharp_factor
+        self.softmax = softmax
 
     def get_features(
         self,
@@ -155,13 +157,15 @@ class KMeanSelector(ActiveSelector):
 
         if pool2labeled_dist_mat is not None:
             if self.coreset_criteria == "min":
-                sample_weight = (
-                    pool2labeled_dist_mat.min(axis=1) * self.sample_weight_scale
-                )
+                sample_weight = pool2labeled_dist_mat.min(axis=1)
             else:
-                sample_weight = (
-                    pool2labeled_dist_mat.sum(axis=1) * self.sample_weight_scale
-                )
+                sample_weight = pool2labeled_dist_mat.mean(axis=1)
+
+            if self.softmax:
+                sample_weight = (sample_weight * self.sharp_factor).softmax(0)
+            else:
+                sample_weight = sample_weight ** self.sharp_factor
+                sample_weight = sample_weight / sample_weight.sum()
         else:
             sample_weight = None
 

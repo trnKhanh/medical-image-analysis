@@ -32,8 +32,8 @@ def kcenter_greedy(dist_mat, n_data, budget, init_idx, coreset_criteria="min"):
         # for all the unselected points, find its nearest neighbor in selected points
         if coreset_criteria == "min":
             mat_min = mat.min(axis=1)
-        elif coreset_criteria == "sum":
-            mat_min = mat.sum(axis=1)
+        elif coreset_criteria == "mean":
+            mat_min = mat.mean(axis=1)
         else:
             raise RuntimeError(
                 f"coreset_criteria {coreset_criteria} is undefined"
@@ -59,7 +59,7 @@ class CoresetSelector(ActiveSelector):
         pin_memory: bool = True,
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
-        coreset_criteria: Literal["sum", "min"] = "min",
+        coreset_criteria: Literal["mean", "min"] = "min",
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
     ) -> None:

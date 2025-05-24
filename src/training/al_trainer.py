@@ -137,8 +137,8 @@ class ALConfig(object):
             "kmean-cosine",
             "badge",
         ] = "random",
-        coreset_criteria: Literal["min", "sum"] = "min",
-        kmean_sample_weight: float = 1.0,
+        coreset_criteria: Literal["min", "mean"] = "min",
+        kmean_sharp_factor: float = 1.0,
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
         loaded_feature_only: bool = False,
@@ -219,7 +219,7 @@ class ALConfig(object):
 
         self.active_selector_name = active_selector_name
         self.coreset_criteria = coreset_criteria
-        self.kmean_sample_weight = kmean_sample_weight
+        self.kmean_sharp_factor = kmean_sharp_factor
         self.feature_path = feature_path
         self.loaded_feature_weight = loaded_feature_weight
         self.loaded_feature_only = loaded_feature_only
@@ -835,7 +835,7 @@ class ALTrainer(BaseTrainer):
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
-                sample_weight_scale=self.config.kmean_sample_weight,
+                sharp_factor=self.config.kmean_sharp_factor,
                 loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "kmean-cosine":
@@ -847,7 +847,7 @@ class ALTrainer(BaseTrainer):
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
-                sample_weight_scale=self.config.kmean_sample_weight,
+                sharp_factor=self.config.kmean_sharp_factor,
                 loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "badge":
