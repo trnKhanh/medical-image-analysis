@@ -17,8 +17,8 @@ def parse_args():
     # >>> Model parameters
     parser.add_argument("--num-classes", default=3, type=int)
     parser.add_argument("--num-decoders", default=3, type=int)
-    parser.add_argument("--patch-size", default=512, nargs="+", type=int)
-    parser.add_argument("--image-size", default=512, nargs="+", type=int)
+    parser.add_argument("--patch-size", default=512, type=int)
+    parser.add_argument("--image-size", default=512, type=int)
     parser.add_argument(
         "--sam-name",
         default="vit_b_dualmask_same_prompt_class_random_large",
