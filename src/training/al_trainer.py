@@ -1558,14 +1558,11 @@ class ALTrainer(BaseTrainer):
 
     def is_finished(self):
         if self.config.early_stop_max_patience:
-            is_finished = (
-                self.current_patience >= self.config.early_stop_max_patience
-            )
-            if is_finished:
+            if self.current_patience >= self.config.early_stop_max_patience:
                 self.logger.info(
                     "Exceeded maximum patience. Training will be early stopped"
                 )
-            return is_finished
+                return True
 
         return self.current_iter >= self.config.num_iters
 
