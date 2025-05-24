@@ -162,7 +162,9 @@ class KMeanSelector(ActiveSelector):
                 sample_weight = pool2labeled_dist_mat.mean(axis=1)
 
             if self.softmax:
+                sample_weight = torch.from_numpy(sample_weight)
                 sample_weight = (sample_weight * self.sharp_factor).softmax(0)
+                sample_weight = sample_weight.numpy()
             else:
                 sample_weight = sample_weight ** self.sharp_factor
                 sample_weight = sample_weight / sample_weight.sum()

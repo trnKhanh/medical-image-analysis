@@ -139,6 +139,7 @@ class ALConfig(object):
         ] = "random",
         coreset_criteria: Literal["min", "mean"] = "min",
         kmean_sharp_factor: float = 1.0,
+        kmean_softmax: bool = False,
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
         loaded_feature_only: bool = False,
@@ -220,6 +221,7 @@ class ALConfig(object):
         self.active_selector_name = active_selector_name
         self.coreset_criteria = coreset_criteria
         self.kmean_sharp_factor = kmean_sharp_factor
+        self.kmean_softmax = kmean_softmax
         self.feature_path = feature_path
         self.loaded_feature_weight = loaded_feature_weight
         self.loaded_feature_only = loaded_feature_only
@@ -836,6 +838,7 @@ class ALTrainer(BaseTrainer):
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
                 sharp_factor=self.config.kmean_sharp_factor,
+                softmax=self.config.kmean_softmax,
                 loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "kmean-cosine":
@@ -848,6 +851,7 @@ class ALTrainer(BaseTrainer):
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
                 sharp_factor=self.config.kmean_sharp_factor,
+                softmax=self.config.kmean_softmax,
                 loaded_feature_only=self.config.loaded_feature_only,
             )
         elif self.config.active_selector_name == "badge":
@@ -924,6 +928,7 @@ class ALTrainer(BaseTrainer):
             self.logger.info(
                 f"kmean_sharp_factor: {self.config.kmean_sharp_factor}"
             )
+            self.logger.info(f"kmean_softmax: {self.config.kmean_softmax}")
         self.logger.info(f"feature_path: {self.config.feature_path}")
         self.logger.info(
             f"loaded_feature_weight: {self.config.loaded_feature_weight}"

@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument("--loaded-feature-weight", default=0.0, type=float)
     parser.add_argument("--loaded-feature-only", action="store_true")
     parser.add_argument("--kmean-sharp-factor", default=1.0, type=float)
+    parser.add_argument("--kmean-softmax", action="store_true")
     parser.add_argument("--coreset-criteria", default="min", choices=["min", "mean"])
     parser.add_argument("--optimizer", default="adam", type=str)
     parser.add_argument("--weight-decay", default=5e-4, type=float)
