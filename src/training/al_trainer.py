@@ -138,6 +138,7 @@ class ALConfig(object):
             "badge",
         ] = "random",
         coreset_criteria: Literal["min", "mean"] = "min",
+        coreset_fusion: Literal["add", "cat"] = "add",
         kmean_sharp_factor: float = 1.0,
         kmean_softmax: bool = False,
         feature_path: Path | str | None = None,
@@ -220,6 +221,7 @@ class ALConfig(object):
 
         self.active_selector_name = active_selector_name
         self.coreset_criteria = coreset_criteria
+        self.coreset_fusion = coreset_fusion
         self.kmean_sharp_factor = kmean_sharp_factor
         self.kmean_softmax = kmean_softmax
         self.feature_path = feature_path
@@ -817,6 +819,7 @@ class ALTrainer(BaseTrainer):
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
+                coreset_fusion=self.config.coreset_fusion,
             )
         elif self.config.active_selector_name == "coreset-cosine":
             self.active_selector = CoresetSelector(
@@ -827,6 +830,7 @@ class ALTrainer(BaseTrainer):
                 feature_path=self.config.feature_path,
                 loaded_feature_weight=self.config.loaded_feature_weight,
                 coreset_criteria=self.config.coreset_criteria,
+                coreset_fusion=self.config.coreset_fusion,
             )
         elif self.config.active_selector_name == "kmean-l2":
             self.active_selector = KMeanSelector(
@@ -924,6 +928,9 @@ class ALTrainer(BaseTrainer):
         ) or self.config.active_selector_name.startswith("kmean"):
             self.logger.info(
                 f"coreset_criteria: {self.config.coreset_criteria}"
+            )
+            self.logger.info(
+                f"coreset_fusion: {self.config.coreset_fusion}"
             )
             self.logger.info(
                 f"kmean_sharp_factor: {self.config.kmean_sharp_factor}"

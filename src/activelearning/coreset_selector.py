@@ -60,6 +60,7 @@ class CoresetSelector(ActiveSelector):
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
         coreset_criteria: Literal["mean", "min"] = "min",
+        coreset_fusion: Literal["add", "cat"] = "add",
         feature_path: Path | str | None = None,
         loaded_feature_weight: float = 0.0,
     ) -> None:
@@ -70,6 +71,7 @@ class CoresetSelector(ActiveSelector):
         self.metric = metric
         self.feature_path = get_path(feature_path) if feature_path else None
         self.coreset_criteria = coreset_criteria
+        self.coreset_fusion = coreset_fusion
         self.loaded_feature_weight = loaded_feature_weight
 
     def cal_scores(
@@ -132,10 +134,39 @@ class CoresetSelector(ActiveSelector):
             feats = None
             feat_dist_mat = 0
 
-        final_dist_mat = (
-            self.loaded_feature_weight * loaded_feat_dist_mat
-            + (1 - self.loaded_feature_weight) * feat_dist_mat
-        )
+        if self.coreset_fusion == "add":
+            final_dist_mat = 0
+
+            if loaded_feats is not None:
+                final_dist_mat = (
+                    final_dist_mat
+                    + self.loaded_feature_weight
+                    * pairwise_distances(loaded_feats, metric=self.metric)
+                )
+
+            if feats is not None:
+                final_dist_mat = final_dist_mat + (
+                    1 - self.loaded_feature_weight
+                ) * pairwise_distances(feats, metric=self.metric)
+        else:
+            final_feat_list = []
+
+            if feats is not None:
+                final_feat_list.append(feats)
+
+            if loaded_feats is not None:
+                if feats is None:
+                    scale_factor = 1
+                else:
+                    D1 = feats.shape[-1]
+                    D2 = loaded_feats.shape[-1]
+                    scale_factor = np.sqrt(D1 / D2 * self.loaded_feature_weight)
+
+                final_feat_list.append(loaded_feats * scale_factor)
+
+            final_feats = np.concatenate(final_feat_list, axis=1)
+            final_dist_mat = pairwise_distances(final_feats, metric=self.metric)
+
 
         return (
             np.array(core_list),
