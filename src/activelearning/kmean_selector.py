@@ -175,6 +175,6 @@ class KMeanSelector(ActiveSelector):
             X=pool_feats, n_clusters=select_num, sample_weight=sample_weight
         )
 
-        selected_samples = list(pool_case_names[selected_indices].tolist())
+        selected_samples = list(set(pool_case_names[selected_indices].tolist()))
 
         return selected_samples

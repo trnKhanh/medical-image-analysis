@@ -138,16 +138,23 @@ class CoresetSelector(ActiveSelector):
             final_dist_mat = 0
 
             if loaded_feats is not None:
+                loaded_feat_dist = pairwise_distances(
+                    loaded_feats, metric=self.metric
+                )
+                loaded_feat_dist /= loaded_feat_dist.sum()
+
                 final_dist_mat = (
                     final_dist_mat
-                    + self.loaded_feature_weight
-                    * pairwise_distances(loaded_feats, metric=self.metric)
+                    + self.loaded_feature_weight * loaded_feat_dist
                 )
 
             if feats is not None:
+                feat_dist = pairwise_distances(feats, metric=self.metric)
+                feat_dist /= feat_dist.sum()
+
                 final_dist_mat = final_dist_mat + (
                     1 - self.loaded_feature_weight
-                ) * pairwise_distances(feats, metric=self.metric)
+                ) * feat_dist
         else:
             final_feat_list = []
 
@@ -166,7 +173,6 @@ class CoresetSelector(ActiveSelector):
 
             final_feats = np.concatenate(final_feat_list, axis=1)
             final_dist_mat = pairwise_distances(final_feats, metric=self.metric)
-
 
         return (
             np.array(core_list),
