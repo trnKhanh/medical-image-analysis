@@ -36,6 +36,7 @@ from datasets import (
     TN3KDataset,
     TG3KDataset,
     FUGCDataset,
+    BUSIDataset,
 )
 from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
@@ -112,7 +113,7 @@ class ALConfig(object):
         image_size: int | tuple[int, int] | None = None,
         model_ckpt: Path | str | None = None,
         # Data parameters
-        dataset: Literal["ACDC", "tn3k", "tg3k", "fugc"] = "ACDC",
+        dataset: Literal["ACDC", "tn3k", "tg3k", "fugc", "busi"] = "ACDC",
         data_path: Path | str = "data",
         do_oversample: bool = False,
         do_augment: bool = False,
@@ -600,6 +601,16 @@ class ALTrainer(BaseTrainer):
                 image_channels=self.config.in_channels,
                 image_size=_image_size,
             )
+        elif self.config.dataset == "busi":
+            dataset = BUSIDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
         else:
             raise ValueError(f"{self.config.dataset} dataset is undefined")
 
@@ -637,11 +648,8 @@ class ALTrainer(BaseTrainer):
         oversampled_dataset = deepcopy(train_dataset)
 
         if self.config.do_oversample:
-            # If dataset is not enough for batch_size, we oversample it
-            # For some reasons, this implementation is extremely faster compared
-            # to just oversample to batch_size
             total_seen_samples = self.config.num_iters * self.config.batch_size
-            num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
+            num_extended = int(np.ceil(self.config.batch_size / len(train_dataset)))
             oversampled_dataset.image_idx = (
                 oversampled_dataset.image_idx * num_extended
             )
@@ -660,7 +668,7 @@ class ALTrainer(BaseTrainer):
     def _get_train_transform(self):
         transforms = []
         if self.config.do_augment:
-            if self.config.dataset == "fugc":
+            if self.config.dataset in ["fugc", "busi"]:
                 transforms.append(
                     RandomTransform(RandomAffine(scale=(0.7, 1.4)), p=0.2)
                 )
@@ -929,9 +937,7 @@ class ALTrainer(BaseTrainer):
             self.logger.info(
                 f"coreset_criteria: {self.config.coreset_criteria}"
             )
-            self.logger.info(
-                f"coreset_fusion: {self.config.coreset_fusion}"
-            )
+            self.logger.info(f"coreset_fusion: {self.config.coreset_fusion}")
             self.logger.info(
                 f"kmean_sharp_factor: {self.config.kmean_sharp_factor}"
             )
