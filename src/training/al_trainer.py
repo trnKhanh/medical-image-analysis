@@ -148,6 +148,7 @@ class ALConfig(object):
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
+        min_iter: int = 0,
         num_iters: int = 4000,
         start_lr: float = 1e-3,
         lr_scheduler_name: Literal["poly", "none"] = "poly",
@@ -232,6 +233,7 @@ class ALConfig(object):
         self.optimizer_kwargs = optimizer_kwargs
         self.grad_norm = grad_norm
         self.num_iters = num_iters
+        self.min_iter = min_iter
         self.start_lr = start_lr
         self.lr_scheduler_name = lr_scheduler_name
         self.lr_interval = lr_interval
@@ -959,6 +961,7 @@ class ALTrainer(BaseTrainer):
             f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
         self.logger.info(f"start_epoch: {self.current_epoch}")
+        self.logger.info(f"min_iter: {self.config.min_iter}")
         self.logger.info(f"num_iters: {self.config.num_iters}")
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
@@ -1580,6 +1583,9 @@ class ALTrainer(BaseTrainer):
                 self.on_valid_epoch_end()
 
     def is_finished(self):
+        if self.current_iter < self.config.min_iter:
+            return False
+
         if self.config.early_stop_max_patience:
             if self.current_patience >= self.config.early_stop_max_patience:
                 self.logger.info(

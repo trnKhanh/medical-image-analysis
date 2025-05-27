@@ -61,6 +61,7 @@ def parse_args():
     parser.add_argument("--kmean-softmax", action="store_true")
     parser.add_argument("--optimizer", default="adam", type=str)
     parser.add_argument("--weight-decay", default=5e-4, type=float)
+    parser.add_argument("--min-iter", default=0, type=int)
     parser.add_argument("--num-iters", default=4000, type=int)
     parser.add_argument("--start-lr", default=1e-3, type=float)
     parser.add_argument("--lr-scheduler", default="poly", type=str)
