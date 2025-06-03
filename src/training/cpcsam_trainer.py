@@ -8,6 +8,11 @@ import logging
 import time
 from pathlib import Path
 
+from medpy import metric
+from einops import repeat
+from scipy.ndimage import zoom
+import h5py
+import SimpleITK as sitk
 import wandb
 import torch
 from torch import nn
@@ -83,6 +88,7 @@ class CPCSAMConfig(object):
         # Model parameters
         in_channels: int = 3,
         num_classes: int = 3,
+        num_decoders: int = 3,
         patch_size: int | tuple[int, int] | None = None,
         image_size: int | tuple[int, int] | None = None,
         sam_name: str = "vit_b_dualmask_same_prompt_class_random_large",
@@ -122,6 +128,8 @@ class CPCSAMConfig(object):
         maximum_save_metric: bool | None = None,
         ## Loss parameters
         loss_name: Literal["dice+ce"] = "dice+ce",
+        dice_batch: bool = False,
+        dice_squared: bool = False,
         dice_weight: float = 0.8,
         ### Loss 2: cross-prompting loss
         loss2_weight: float = 1.0,
@@ -157,6 +165,7 @@ class CPCSAMConfig(object):
         # >>> Model parameters
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.num_decoders = num_decoders
         self.patch_size = patch_size
         self.image_size = image_size
         self.sam_name = sam_name
@@ -196,6 +205,8 @@ class CPCSAMConfig(object):
         self.save_metric_name = save_metric_name
         self.maximum_save_metric = maximum_save_metric
         self.loss_name = loss_name
+        self.dice_batch = dice_batch
+        self.dice_squared = dice_squared
         self.dice_weight = dice_weight
         # > Loss 2: cross-prompting loss
         self.loss2_weight = loss2_weight
@@ -256,6 +267,7 @@ class CPCSAMTrainer(BaseTrainer):
         self,
         work_path: Path | str = Path.cwd(),
         device: torch.device | str = torch.device("cuda"),
+        deterministic: bool = True,
         config: CPCSAMConfig | dict | str | Path | None = None,
         # Log parameters
         verbose: bool = True,
@@ -278,6 +290,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.work_path = get_path(work_path)
         self.device = torch.device("cpu")
+        self.deterministic = deterministic
         self.to(device)
 
         self._set_seed(self.config.seed)
@@ -295,6 +308,13 @@ class CPCSAMTrainer(BaseTrainer):
         # <<< Log parameters
 
     def initialize(self):
+        if self.deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+        else:
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+
         self._set_snapshot_work_dir()
         self._setup_wandb()
         self._setup_logger()
@@ -310,19 +330,16 @@ class CPCSAMTrainer(BaseTrainer):
             f"{current_time_str}",
             f"patchsz-{self.config.patch_size}",
             f"imgsz-{self.config.image_size}",
+            f"decoders-{self.config.num_decoders}",
             f"lora-{self.config.lora_rank}",
             f"prompt-{self.config.promptmode}",
             f"dropout-{self.config.dropout_rate}",
-            f"point-{self.config.num_points_prompt}",
-            f"bbox-{self.config.bbox_change_rate}",
             f"labeled-{self.config.labeled_num}",
             f"batchsz-{self.config.batch_size}",
             f"epoch-{self.config.num_epochs}",
             f"optimizer-{self.config.optimizer_name}",
-            f"lr-{self.config.lr_scheduler_name}",
-            f"lrwarm-{self.config.lr_warmup_iter}",
-            f"warmiter-{self.config.warmup_iter}",
             f"startlr-{self.config.start_lr}",
+            f"warmiter-{self.config.warmup_iter}",
             f"dice-{self.config.dice_weight}",
             f"coe1-{self.config.consistency_weight_1}",
             f"coe2-{self.config.consistency_weight_2}",
@@ -347,12 +364,17 @@ class CPCSAMTrainer(BaseTrainer):
                 config=self.config._config_dict,
             )
 
-            wandb.define_metric("train_epoch")
-            wandb.define_metric("train/epoch/*", step_metric="train_epoch")
-            wandb.define_metric("train_iter")
-            wandb.define_metric("train/iter/*", step_metric="train_iter")
-            wandb.define_metric("valid_step")
-            wandb.define_metric("valid/*", step_metric="valid_step")
+            self.wandb_runner.define_metric("train_epoch")
+            self.wandb_runner.define_metric(
+                "train/epoch/*", step_metric="train_epoch"
+            )
+            self.wandb_runner.define_metric("train_iter")
+            self.wandb_runner.define_metric(
+                "train/iter/*", step_metric="train_iter"
+            )
+            self.wandb_runner.define_metric("valid_step")
+            self.wandb_runner.define_metric("valid/*", step_metric="valid_step")
+            self.wandb_runner.define_metric("test/*", step_metric="valid_step")
 
     def _set_seed(self, seed: int):
         os.environ["CPCSAM_SEED"] = str(seed)
@@ -374,7 +396,7 @@ class CPCSAMTrainer(BaseTrainer):
         assert self.logger is not None
 
         if not self.log_path:
-            self.log_path = self.work_path / "log.txt"
+            self.log_path = self.work_path / "log.log"
 
         self.log_path = get_path(self.log_path)
 
@@ -420,7 +442,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.config.save(config_json)
         if self.use_wandb:
-            wandb.log_artifact(
+            self.wandb_runner.log_artifact(
                 config_json,
                 name=f"config_{self.wandb_runner.id}",
                 type="config",
@@ -457,6 +479,7 @@ class CPCSAMTrainer(BaseTrainer):
             dropout_rate=self.config.dropout_rate,
             num_points_prompt=self.config.num_points_prompt,
             bbox_change_rate=self.config.bbox_change_rate,
+            num_decoders=self.config.num_decoders,
         )
         self.model = LoRA_Sam(self.sam, self.config.lora_rank)
 
@@ -575,7 +598,9 @@ class CPCSAMTrainer(BaseTrainer):
             )
 
         if self.config.image_size:
-            transforms.append(JointResize(self.config.image_size))
+            transforms.append(
+                JointResize(self.config.image_size, use_torchvision=False)
+            )
 
         return ComposeTransform(transforms)
 
@@ -648,21 +673,14 @@ class CPCSAMTrainer(BaseTrainer):
                     "num_classes": self.config.num_classes,
                     "smooth": 1e-5,
                     "do_bg": True,
+                    "softmax": True,
+                    "batch": self.config.dice_batch,
+                    "squared": self.config.dice_squared,
                 },
                 ce_loss=torch.nn.CrossEntropyLoss,
                 ce_kwargs={},
-                default_dice_weight=0.8,
-            )
-            self.unsupervised_loss = DualBranchDiceAndCELoss(
-                dice_loss=DiceLoss,
-                dice_kwargs={
-                    "num_classes": self.config.num_classes,
-                    "smooth": 1e-5,
-                    "do_bg": True,
-                },
-                ce_loss=torch.nn.CrossEntropyLoss,
-                ce_kwargs={},
-                default_dice_weight=0.8,
+                default_dice_weight=self.config.dice_weight,
+                default_ce_weight=1 - self.config.dice_weight,
             )
         else:
             raise ValueError(f"Loss function {self.config.loss_name} not found")
@@ -705,6 +723,7 @@ class CPCSAMTrainer(BaseTrainer):
 
         self.logger.info(f"model: {self.model}")
         self.logger.info(f"  num_classes: {self.config.num_classes}")
+        self.logger.info(f"  num_decoders: {self.config.num_decoders}")
         self.logger.info(f"  patch_size: {self.config.patch_size}")
         self.logger.info(f"  image_size: {self.config.image_size}")
         self.logger.info(f"  pretrained_model: {self.config.model_ckpt}")
@@ -739,7 +758,7 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"  num_workers: {self.config.num_workers}")
         self.logger.info(f"  pin_memory: {self.config.pin_memory}")
 
-        self.logger.info(f"optimizer: {self.config.optimizer_name}")
+        self.logger.info(f"optimizer: {self.optimizer}")
         self.logger.info(f"  lr_warmup_iter: {self.config.lr_warmup_iter}")
         self.logger.info(f"  lr_scheduler: {self.config.lr_scheduler_name}")
         self.logger.info(f"  start_lr: {self.config.start_lr}")
@@ -751,6 +770,8 @@ class CPCSAMTrainer(BaseTrainer):
         self.logger.info(f"warmup_iter: {self.config.warmup_iter}")
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
+        self.logger.info(f"dice_batch: {self.config.dice_batch}")
+        self.logger.info(f"dice_squared: {self.config.dice_squared}")
         self.logger.info(f"dice_weight: {self.config.dice_weight}")
         self.logger.info(f"loss2_weight: {self.config.loss2_weight}")
         self.logger.info(
@@ -789,7 +810,7 @@ class CPCSAMTrainer(BaseTrainer):
         self._remove_config_file()
 
         if self.use_wandb and self.config_path:
-            wandb.log_artifact(
+            self.wandb_runner.log_artifact(
                 self.config_path,
                 name=f"config_{self.wandb_runner.id}",
                 type="config",
@@ -862,7 +883,7 @@ class CPCSAMTrainer(BaseTrainer):
         ckpt_path = self.work_path / f"ckpt/final_model"
         self.save_state_dict(ckpt_path, True)
         if self.use_wandb:
-            wandb.log_model(
+            self.wandb_runner.log_model(
                 ckpt_path,
                 name=f"model_{self.wandb_runner.id}",
                 aliases=[f"epoch_{self.current_epoch}", "final"],
@@ -884,9 +905,6 @@ class CPCSAMTrainer(BaseTrainer):
         time_elapsed = self._epoch_end_time - self._epoch_start_time
         self.logger.info(f"Epoch time elapsed: {time_elapsed:.3f} seconds")
 
-        for h in self.logger.handlers:
-            h.flush()
-
     def on_train_epoch_start(self):
         self._train_start_time = time.time()
         self.logger.info("Train")
@@ -902,18 +920,25 @@ class CPCSAMTrainer(BaseTrainer):
             self.save_state_dict(ckpt_path, True)
 
             if self.use_wandb:
-                wandb.log_model(
+                self.wandb_runner.log_model(
                     ckpt_path,
                     name=f"model_{self.wandb_runner.id}",
                     aliases=[f"epoch_{self.current_epoch}"],
                 )
 
-        train_losses = (
-            torch.stack([o["loss"] for o in self.epoch_train_outputs])
-            .mean(0)
-            .tolist()
-        )
-        self.logger.info(f"Loss ({self.config.loss_name}): {train_losses}")
+        train_losses = {
+            "loss": torch.zeros(1, device=self.device),
+            "loss1": torch.zeros(1, device=self.device),
+            "loss2": torch.zeros(1, device=self.device),
+        }
+        for l in train_losses:
+            train_losses[l] = torch.stack(
+                [o["loss"][l] for o in self.epoch_train_outputs]
+            ).mean(0)
+
+        present_dict = {k: v.tolist() for k, v in train_losses.items()}
+
+        self.logger.info(f"Loss ({self.config.loss_name}): {present_dict}")
 
         self._train_end_time = time.time()
         time_elapsed = self._train_end_time - self._train_start_time
@@ -921,13 +946,15 @@ class CPCSAMTrainer(BaseTrainer):
 
         if self.use_wandb:
             train_metric = {
-                "train/epoch/losses/loss": train_losses[0],
-                "train/epoch/losses/loss1": train_losses[1],
-                "train/epoch/losses/loss2": train_losses[2],
-                "train/epoch/losses/loss3": train_losses[3],
+                "train/epoch/losses/loss": train_losses["loss"].item(),
+                "train/epoch/losses/loss1": train_losses["loss1"].item(),
+                "train/epoch/losses/loss2": train_losses["loss2"].sum().item(),
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
             }
+            for id, local_loss2 in enumerate(train_losses["loss2"].tolist()):
+                train_metric[f"train/epoch/losses/loss2_{id}"] = local_loss2
+
             self.wandb_runner.log(train_metric)
 
     def on_valid_epoch_start(self):
@@ -1014,7 +1041,7 @@ class CPCSAMTrainer(BaseTrainer):
             self.save_state_dict(ckpt_path)
 
             if self.use_wandb:
-                wandb.log_model(
+                self.wandb_runner.log_model(
                     ckpt_path,
                     name=f"best_model_{self.wandb_runner.id}",
                     aliases=[
@@ -1023,6 +1050,10 @@ class CPCSAMTrainer(BaseTrainer):
                     ],
                 )
             is_improved = True
+
+        if is_improved:
+            # TODO: this is inpropriate
+            self.perform_real_test(False, False)
 
         if is_improved:
             self.current_patience = 0
@@ -1042,16 +1073,17 @@ class CPCSAMTrainer(BaseTrainer):
                 f"average_hd95={avg_hd.item():.4f}",
                 f"loss={loss.item():.4f}",
             ]
-            self.wandb_runner.alert(
-                title="Improved Performance",
-                text="; ".join(text_lines),
-                level="INFO",
-            )
+            if self.use_wandb:
+                self.wandb_runner.alert(
+                    title="Improved Performance",
+                    text="; ".join(text_lines),
+                    level="INFO",
+                )
         else:
             self.current_patience += 1
             if self.config.early_stop_max_patience:
                 alert_threshold = self.config.early_stop_max_patience * 0.5
-                if self.current_patience >= alert_threshold:
+                if self.current_patience >= alert_threshold and self.use_wandb:
                     self.wandb_runner.alert(
                         title="Performance Stagnation",
                         text=f"Performance is not improved for {self.current_patience} step",
@@ -1071,6 +1103,63 @@ class CPCSAMTrainer(BaseTrainer):
         predicted_segmentation_onehot.scatter_(1, output_seg, 1)
 
         return predicted_segmentation_onehot
+
+    def _compute_contrastive_loss(
+        self,
+        outputs: dict,
+        num_decoders: int,
+        labeled_label_batch: torch.Tensor,
+    ):
+        contrastive_loss = torch.zeros(1, device=self.device)
+
+        labeled_features_list = []
+        labeled_predictions_list = []
+
+        unlabeled_features_list = []
+        unlabeled_predictions_list = []
+        for i in range(num_decoders):
+            dense_features = outputs["dense_features"][i]
+            soft_masks = outputs["masks"][i].softmax(1)
+
+            labeled_features_list.append(
+                dense_features[: self.config.labeled_batch_size]
+            )
+            labeled_predictions_list.append(
+                soft_masks[: self.config.labeled_batch_size].argmax(1)
+            )
+
+            unlabeled_features_list.append(
+                dense_features[self.config.labeled_batch_size :]
+            )
+            unlabeled_predictions_list.append(
+                soft_masks[self.config.labeled_batch_size :].argmax(1)
+            )
+
+        labeled_features = torch.cat(labeled_features_list, dim=0)
+        labeled_predictions = torch.cat(labeled_predictions_list, dim=0)
+        unlabeled_features = torch.cat(unlabeled_features_list, dim=0)
+        unlabeled_predictions = torch.cat(unlabeled_predictions_list, dim=0)
+        labeled_labels = labeled_label_batch.repeat(
+            len(labeled_features_list), 1, 1
+        )
+
+        self.contrastive_loss.update_memory(
+            features=labeled_features,
+            predictions=labeled_predictions,
+            labels=labeled_labels,
+        )
+        contrastive_loss = contrastive_loss + self.contrastive_loss(
+            labeled_features,
+            labeled_labels,
+            self.config.contrastive_dropout_rate,
+        )
+        contrastive_loss = contrastive_loss + self.contrastive_loss(
+            unlabeled_features,
+            unlabeled_predictions,
+            self.config.contrastive_dropout_rate,
+        )
+
+        return contrastive_loss
 
     def train_step(self, sampled_batch):
         self.model.train()
@@ -1092,82 +1181,61 @@ class CPCSAMTrainer(BaseTrainer):
         )
 
         assert image_batch.max() <= 3, f"image_batch max: {image_batch.max()}"
+
+        labeled_label_batch = label_batch[: self.config.labeled_batch_size]
+
         multimask_output = True
+        num_decoders = len(self.model.sam.mask_decoders)
+        loss2_weight = self.loss2_weight_rampup.step(self.current_iter)
+        loss3_weight = self.loss3_weight_rampup.step(self.current_iter)
 
-        # the first round
-
-        image_embeddings = self.model.sam.get_image_embeddings(image_batch)
+        # the first round: supervised only
         outputs = self.model(
             image_batch,
             multimask_output,
             self.config.image_size,
-            image_embeddings=image_embeddings,
         )
-        num_decoders = len(self.model.sam.mask_decoders)
-
-        labeled_label_batch = label_batch[: self.config.labeled_batch_size]
 
         loss1 = torch.zeros(1, device=self.device)
+
         for i in range(num_decoders):
             low_res_logits = outputs["low_res_logits"][i]
             labeled_low_res_logits = low_res_logits[
                 : self.config.labeled_batch_size
             ]
-            supervised_loss, _, _ = self.supervised_loss(
+            supervised_loss = self.supervised_loss(
                 labeled_low_res_logits,
                 labeled_label_batch,
-                self.config.dice_weight,
             )
             loss1 += supervised_loss
 
-        labeled_features_list = []
-        labeled_predictions_list = []
-
-        unlabeled_features_list = []
-        unlabeled_predictions_list = []
-
         if self.config.use_contrastive_loss:
-            for i in range(num_decoders):
-                dense_features = outputs["dense_features"][i]
-                soft_masks = outputs["masks"][i].softmax(1)
+            loss1 += loss3_weight * self._compute_contrastive_loss(
+                outputs, num_decoders, labeled_label_batch
+            )
 
-                labeled_features_list.append(
-                    dense_features[: self.config.labeled_batch_size]
-                )
-                labeled_predictions_list.append(
-                    soft_masks[: self.config.labeled_batch_size].argmax(1)
-                )
+        self.optimizer.zero_grad()
+        loss1.backward()
+        self.optimizer.step()
 
-                unlabeled_features_list.append(
-                    dense_features[self.config.labeled_batch_size :]
-                )
-                unlabeled_predictions_list.append(
-                    soft_masks[self.config.labeled_batch_size :].argmax(1)
-                )
-
-        # the second round
-        supervised_loss_round2 = torch.zeros(1, device=self.device)
-        supervised_loss_round2_r = torch.zeros(1, device=self.device)
-
-        consistency_loss_round2 = torch.zeros(1, device=self.device)
-        consistency_loss_round2_r = torch.zeros(1, device=self.device)
-
-        loss2 = torch.zeros(1, device=self.device)
+        # the second round: supervised + cross-prompting
+        loss2_list = []
 
         if self.current_iter >= self.config.warmup_iter:
             for prompt_idx in range(num_decoders):
+                supervised_loss_round2 = torch.zeros(1, device=self.device)
+                supervised_loss_round2_r = torch.zeros(1, device=self.device)
+
+                consist_loss_round2 = torch.zeros(1, device=self.device)
+                consist_loss_round2_r = torch.zeros(1, device=self.device)
+
                 outputs_round2 = self.model(
                     image_batch,
                     multimask_output,
                     self.config.image_size,
                     prompt_idx,
                     self.config.promptmode,
-                    image_embeddings,
                 )
-                dense_features = outputs_round2["dense_features"][prompt_idx]
-                dense_features_r = outputs_round2["dense_features_r"][
-                    prompt_idx
-                ]
 
                 low_res_logits_prompt = outputs_round2["low_res_logits"][
                     prompt_idx
@@ -1175,25 +1243,6 @@ class CPCSAMTrainer(BaseTrainer):
                 low_res_logits_prompt_r = outputs_round2["low_res_logits_r"][
                     prompt_idx
                 ]
-                # Update the list of labeled and unlabled features/predictions
-                # if we use contrastive loss
-                if self.config.use_contrastive_loss:
-                    labeled_features_list.append(
-                        dense_features[: self.config.labeled_batch_size]
-                    )
-                    unlabeled_features_list.append(
-                        dense_features[self.config.labeled_batch_size :]
-                    )
-                    labeled_predictions_list.append(
-                        low_res_logits_prompt[: self.config.labeled_batch_size]
-                        .softmax(1)
-                        .argmax(1)
-                    )
-                    unlabeled_predictions_list.append(
-                        low_res_logits_prompt[self.config.labeled_batch_size :]
-                        .softmax(1)
-                        .argmax(1)
-                    )
 
                 # Compute the supervised loss of the prompt output
                 labeled_low_res_logits_prompt = low_res_logits_prompt[
@@ -1203,15 +1252,13 @@ class CPCSAMTrainer(BaseTrainer):
                     : self.config.labeled_batch_size
                 ]
 
-                supervised_loss, _, _ = self.supervised_loss(
+                supervised_loss = self.supervised_loss(
                     labeled_low_res_logits_prompt,
                     labeled_label_batch,
-                    self.config.dice_weight,
                 )
-                supervised_loss_r, _, _ = self.supervised_loss(
+                supervised_loss_r = self.supervised_loss(
                     labeled_low_res_logits_prompt_r,
                     labeled_label_batch,
-                    self.config.dice_weight,
                 )
 
                 supervised_loss_round2 += supervised_loss
@@ -1234,77 +1281,57 @@ class CPCSAMTrainer(BaseTrainer):
 
                 for id in range(num_decoders):
                     if id != prompt_idx:
-                        consistency_loss, _, _ = self.supervised_loss(
+                        consistency_loss = self.supervised_loss(
                             outputs_round2["low_res_logits"][id][
                                 self.config.labeled_batch_size :
                             ],
                             pseudo_label_prompt,
-                            0.5,
                         )
-                        consistency_loss_round2 += consistency_loss
+                        consist_loss_round2 += consistency_loss
 
-                consistency_loss_r, _, _ = self.supervised_loss(
+                consistency_loss_r = self.supervised_loss(
                     low_res_logits_prompt_r[self.config.labeled_batch_size :],
                     pseudo_label_prompt,
-                    0.5,
                 )
-                consistency_loss_round2_r += consistency_loss_r
+                consist_loss_round2_r += consistency_loss_r
 
-            loss2 = (
-                supervised_loss_round2
-                + supervised_loss_round2_r
-                + self.config.consistency_weight_1 * consistency_loss_round2
-                + self.config.consistency_weight_2 * consistency_loss_round2_r
-            )
+                local_loss2 = (
+                    supervised_loss_round2
+                    + supervised_loss_round2_r
+                    + self.config.consistency_weight_1 * consist_loss_round2
+                    + self.config.consistency_weight_2 * consist_loss_round2_r
+                )
 
-        contrastive_loss = torch.zeros(1, device=self.device)
-        if self.config.use_contrastive_loss:
-            labeled_features = torch.cat(labeled_features_list, dim=0)
-            labeled_predictions = torch.cat(labeled_predictions_list, dim=0)
-            unlabeled_features = torch.cat(unlabeled_features_list, dim=0)
-            unlabeled_predictions = torch.cat(unlabeled_predictions_list, dim=0)
-            labeled_labels = labeled_label_batch.repeat(
-                len(labeled_features_list), 1, 1
-            )
+                if self.config.use_contrastive_loss:
+                    local_loss2 += (
+                        loss3_weight
+                        * self._compute_contrastive_loss(
+                            outputs_round2, num_decoders, labeled_label_batch
+                        )
+                    )
 
-            self.contrastive_loss.update_memory(
-                features=labeled_features,
-                predictions=labeled_predictions,
-                labels=labeled_labels,
-            )
-            contrastive_loss = contrastive_loss + self.contrastive_loss(
-                labeled_features,
-                labeled_labels,
-                self.config.contrastive_dropout_rate,
-            )
-            contrastive_loss = contrastive_loss + self.contrastive_loss(
-                unlabeled_features,
-                unlabeled_predictions,
-                self.config.contrastive_dropout_rate,
-            )
+                loss2_list.append(local_loss2)
 
-        loss3 = torch.zeros(1, device=self.device)
+                local_loss2 = local_loss2 * loss2_weight
 
-        if self.config.use_contrastive_loss:
-            loss3 = loss3 + self.config.contrastive_weight * contrastive_loss
+                self.optimizer.zero_grad()
+                local_loss2.backward()
+                self.optimizer.step()
 
-        loss2_weight = self.loss2_weight_rampup.step(self.current_iter)
-        loss3_weight = self.loss3_weight_rampup.step(self.current_iter)
-
-        loss = loss1 + loss2_weight * loss2 + loss3_weight * loss3
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        losses = torch.Tensor(
-            [
-                loss.detach(),
-                loss1.detach(),
-                loss2.detach(),
-                loss3.detach(),
-            ]
+        loss2 = (
+            torch.cat(loss2_list, dim=0)
+            if len(loss2_list)
+            else torch.zeros(num_decoders, device=self.device)
         )
-        self.logger.info(f"Loss: {losses.tolist()}")
+        loss = loss1 + loss2_weight * loss2.sum()
+
+        losses = {
+            "loss": loss.detach(),
+            "loss1": loss1.detach(),
+            "loss2": loss2.detach(),
+        }
+        present_dict = {k: v.tolist() for k, v in losses.items()}
+        self.logger.info(f"Loss: {present_dict}")
         self.epoch_train_outputs.append({"loss": losses})
 
         if self.use_wandb:
@@ -1313,13 +1340,15 @@ class CPCSAMTrainer(BaseTrainer):
                 "train/iter/lr": lr,
                 "train/iter/loss2_weight": loss2_weight,
                 "train/iter/loss3_weight": loss3_weight,
-                "train/iter/losses/loss": losses[0],
-                "train/iter/losses/loss1": losses[1],
-                "train/iter/losses/loss2": losses[2],
-                "train/iter/losses/loss3": losses[3],
+                "train/iter/losses/loss": losses["loss"].item(),
+                "train/iter/losses/loss1": losses["loss1"].item(),
+                "train/iter/losses/loss2": losses["loss2"].sum().item(),
                 "train_epoch": self.current_epoch,
                 "train_iter": self.current_iter,
             }
+            for id, local_loss2 in enumerate(losses["loss2"]):
+                train_metric[f"train/iter/losses/loss2_{id}"] = local_loss2
+
             self.wandb_runner.log(train_metric)
 
         _train_step_end_time = time.time()
@@ -1392,13 +1421,23 @@ class CPCSAMTrainer(BaseTrainer):
         self.train()
         self.perform_real_test()
 
-    def perform_real_test(self):
+        if self.use_wandb:
+            if self.log_path:
+                self.wandb_runner.log_artifact(
+                    self.log_path,
+                    name=f"log_{self.wandb_runner.id}",
+                    type="log",
+                )
+
+    def perform_real_test(self, load_ckpt: bool = True, log_table: bool = True):
         best_model_path = self.work_path / "best_model"
-        if best_model_path.exists():
+        if load_ckpt and best_model_path.exists():
             try:
                 self.load_state_dict(self.work_path / "best_model")
             except:
                 pass
+
+        self.model.to(self.device)
 
         test_dataset = ACDCDataset(
             data_path=self.config.data_path,
@@ -1461,22 +1500,39 @@ class CPCSAMTrainer(BaseTrainer):
                     :, class_id - 1, metric_id
                 ].tolist()
 
-        if self.use_wandb:
+        if self.use_wandb and log_table:
             wandb_table = wandb.Table(
                 columns=list(dataframe_dict.keys()),
                 data=list(zip(*list(dataframe_dict.values()))),
             )
             self.wandb_runner.log({"test_performance": wandb_table})
 
-        avg_metric = metric_tensor.mean(0)
+        avg_metric_per_cls = metric_tensor.mean(0)
         self.logger.info("Real test results:")
         for id in classes.keys():
             if id == 0:
                 continue
 
-            self.logger.info(f"  {classes[id]}: {avg_metric[id-1].tolist()}")
+            self.logger.info(f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}")
 
-        self.logger.info(f"Average: {avg_metric.mean(0).tolist()}")
+        avg_metric = avg_metric_per_cls.mean(0)
+        self.logger.info(f"Average: {avg_metric.tolist()}")
+        if self.use_wandb:
+            avg_dsc = avg_metric[0]
+            avg_hd = avg_metric[1]
+            avg_asd = avg_metric[2]
+            avg_jc = avg_metric[3]
+            test_metric = {
+                "test/metric/dsc": avg_dsc.item(),
+                "test/metric/hd95": avg_hd.item(),
+                "test/metric/asd": avg_asd.item(),
+                "test/metric/jc": avg_jc.item(),
+                "train_epoch": self.current_epoch,
+                "train_iter": self.current_iter,
+                "valid_step": self.current_iter,
+            }
+
+            self.wandb_runner.log(test_metric)
 
         # save:
         write_csv = self.work_path / f"test_mean.csv"

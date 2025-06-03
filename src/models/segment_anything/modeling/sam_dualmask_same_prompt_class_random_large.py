@@ -202,9 +202,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                 masks=mask_prompt,
             )
         else:
-            sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=None, boxes=None, masks=None
-            )
+            raise ValueError(f"promptmode {prompt} is invalid")
 
         return sparse_embeddings, sparse_embeddings_r, dense_embeddings
 
@@ -283,7 +281,7 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                     multimask_output=multimask_output,
                 )
             )
-            
+
             # Obtain the pseudo labels used for generating prompts
             with torch.no_grad():
                 if self.dropout_rate > 0:
@@ -532,13 +530,10 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
         points_prompt = np.zeros([b, total_points, 2])
         points_label = np.zeros([b, total_points])
         points_prompt_random = np.zeros([b, total_points, 2])
-        fit_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        loose_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        boxes_label = np.zeros([b, num_class - 1])
+        fit_boxes_prompt = np.zeros([b, num_class, 2, 2])
+        loose_boxes_prompt = np.zeros([b, num_class, 2, 2])
+        boxes_label = np.zeros([b, num_class])
 
-        from datetime import datetime
-
-        st_time = datetime.now()
         for idx in range(b):  # iterate over each image
             for cls in range(num_class):  # find points for each class
                 cls_slice = slice(cum_num_points[cls], cum_num_points[cls + 1])
@@ -591,155 +586,20 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                     )
                     points_prompt[idx, cls_slice] = center_coords
 
-                    if cls > 0:
-                        points_label[idx, cls_slice] = cls
-
-                        fit_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, self.bbox_change_rate[0]
-                        )
-                        loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
+                    # Generating box prompts
+                    fit_boxes_prompt[idx, cls] = self._get_bbox(
+                        binary_msk, self.bbox_change_rate[0]
+                    )
+                    if israndom:
+                        loose_boxes_prompt[idx, cls] = self._get_bbox(
                             binary_msk, self.bbox_change_rate[1]
                         )
-                else:
-                    (
-                        points_prompt[idx, cls_slice, 0],
-                        points_prompt[idx, cls_slice, 1],
-                    ) = (points_prompt[idx, 0, 0], points_prompt[idx, 0, 1])
-                    (
-                        points_prompt_random[idx, cls_slice, 0],
-                        points_prompt_random[idx, cls_slice, 1],
-                    ) = (points_prompt[idx, 0, 0], points_prompt[idx, 0, 1])
-                    points_label[idx, cls_slice] = 0
-        mask_prompt = F.interpolate(
-            torch.tensor(coarse_mask_np).unsqueeze(1).float(),
-            self.prompt_encoder.mask_input_size,
-            mode="nearest",
-        ).to(coarse_mask.device)
-        points_prompt = torch.tensor(points_prompt).to(coarse_mask.device)
-        points_label = torch.tensor(points_label).to(coarse_mask.device)
-        points_prompt = (points_prompt, points_label)
 
-        fit_boxes_prompt = torch.tensor(fit_boxes_prompt).to(coarse_mask.device)
-        boxes_label = torch.tensor(boxes_label).to(coarse_mask.device)
-        fit_boxes_prompt = (fit_boxes_prompt, boxes_label)
-
-        if israndom:
-            points_prompt_random = torch.tensor(points_prompt_random).to(
-                coarse_mask.device
-            )
-            points_prompt_random = (points_prompt_random, points_label)
-
-            loose_boxes_prompt = torch.tensor(loose_boxes_prompt).to(
-                coarse_mask.device
-            )
-            loose_boxes_prompt = (loose_boxes_prompt, boxes_label)
-
-            return (
-                points_prompt,
-                points_prompt_random,
-                fit_boxes_prompt,
-                loose_boxes_prompt,
-                mask_prompt,
-            )
-
-        return points_prompt, fit_boxes_prompt, mask_prompt
-
-    def _prompt_generate_random_fast(
-        self, coarse_mask, img_size, israndom=False
-    ):  # generate point prompts
-        b, num_class, h, w = coarse_mask.shape
-
-        coarse_mask_np = torch.argmax(coarse_mask, dim=1)
-        coarse_mask_np = F.interpolate(
-            coarse_mask_np.unsqueeze(1).float(),
-            (img_size, img_size),
-            mode="nearest",
-        ).squeeze(1)
-        coarse_mask_np = coarse_mask_np.detach().cpu().numpy()
-
-        # points: BxNx2 tensor & boxes
-        # points_prompt = np.zeros([b, num_class, 2])
-        # points_label = np.zeros([b, num_class])
-        # points_prompt_random = np.zeros([b, num_class, 2])
-        num_points = np.random.randint(1, 3, num_class)
-        cum_num_points = np.concatenate(
-            [np.zeros(1, dtype=np.int64), np.cumsum(num_points)]
-        )
-        total_points = np.sum(num_points)
-        points_prompt = np.zeros([b, total_points, 2])
-        points_label = np.zeros([b, total_points])
-        points_prompt_random = np.zeros([b, total_points, 2])
-        fit_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        loose_boxes_prompt = np.zeros([b, num_class - 1, 2, 2])
-        boxes_label = np.zeros([b, num_class - 1])
-        for idx in range(b):  # iterate over each image
-            for cls in range(num_class):  # find points for each class
-                cls_slice = slice(cum_num_points[cls], cum_num_points[cls + 1])
-                # obtain the binary mask
-                mask_cls = (coarse_mask_np[idx] == cls).astype(np.uint8)
-                if mask_cls.max() > 0:
-                    label_msk, region_ids = label(
-                        mask_cls, connectivity=2, return_num=True
-                    )
-                    ratio_list, regionid_list = [], []
-                    for region_id in range(1, region_ids + 1):
-                        # find coordinates of points in the region
-                        binary_msk = np.where(label_msk == region_id, 1, 0)
-
-                        # clean some region that is abnormally small
-                        r = np.sum(binary_msk) / np.sum(mask_cls)
-                        # print('curr mask over all mask ratio', r)
-                        ratio_list.append(r)
-                        regionid_list.append(region_id)
-
-                    ratio_list, regionid_list = zip(
-                        *sorted(zip(ratio_list, regionid_list))
-                    )
-                    regionid_list = regionid_list[::-1]
-
-                    binary_msk = np.where(label_msk == regionid_list[0], 1, 0)
-
-                    if israndom:
-                        cY_r, cX_r = np.where(binary_msk == 1)
-                        # random_idx = np.random.randint(0, len(cX_r))
-                        # points_prompt_random[idx,cls,0], points_prompt_random[idx,cls,1] = int(cX_r[random_idx]), int(cY_r[random_idx])
-                        random_idx = np.random.randint(
-                            0, len(cX_r), num_points[cls]
-                        )
-                        random_coords = np.stack(
-                            [cX_r[random_idx], cY_r[random_idx]], axis=1
-                        )
-                        points_prompt_random[idx, cls_slice] = random_coords
-
-                    # Calculates the distance to the closest zero pixel for each pixel of the source image.
-                    # Ref from RITM: https://github.com/SamsungLabs/ritm_interactive_segmentation/blob/aa3bb52a77129e477599b5edfd041535bc67b259/isegm/data/points_sampler.py
-                    # NOTE: numpy and opencv have inverse definition of row and column
-                    # NOTE: SAM and opencv have the same definition
-                    padded_mask = np.uint8(
-                        np.pad(binary_msk, ((1, 1), (1, 1)), "constant")
-                    )
-                    dist_img = cv2.distanceTransform(
-                        padded_mask, distanceType=cv2.DIST_L2, maskSize=5
-                    ).astype(np.float32)[1:-1, 1:-1]
-                    # cY, cX = np.where(dist_img==dist_img.max())
-                    # random_idx = np.random.randint(0, len(cX))
-                    # points_prompt[idx,cls,0], points_prompt[idx,cls,1] = int(cX[random_idx]), int(cY[random_idx])
-                    cY, cX = np.where(dist_img == dist_img.max())
-                    random_idx = np.random.randint(0, len(cX), num_points[cls])
-                    center_coords = np.stack(
-                        [cX[random_idx], cY[random_idx]], axis=1
-                    )
-                    points_prompt[idx, cls_slice] = center_coords
-
+                    # Assign labels to prompts
                     if cls > 0:
                         points_label[idx, cls_slice] = cls
 
-                        fit_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, 0.1
-                        )
-                        loose_boxes_prompt[idx, cls - 1] = self._get_bbox(
-                            binary_msk, 0.3
-                        )
+                        boxes_label[idx, cls] = cls
                 else:
                     (
                         points_prompt[idx, cls_slice, 0],
@@ -750,17 +610,28 @@ class Sam_dualmask_same_prompt_class_random_large(nn.Module):
                         points_prompt_random[idx, cls_slice, 1],
                     ) = (points_prompt[idx, 0, 0], points_prompt[idx, 0, 1])
                     points_label[idx, cls_slice] = 0
+
+                    fit_boxes_prompt[idx, cls] = fit_boxes_prompt[idx, 0].copy()
+                    loose_boxes_prompt[idx, cls] = loose_boxes_prompt[
+                        idx, 0
+                    ].copy()
+                    boxes_label[idx, cls] = 0
+
         mask_prompt = F.interpolate(
             torch.tensor(coarse_mask_np).unsqueeze(1).float(),
             self.prompt_encoder.mask_input_size,
             mode="nearest",
         ).to(coarse_mask.device)
         points_prompt = torch.tensor(points_prompt).to(coarse_mask.device)
-        points_label = torch.tensor(points_label).to(coarse_mask.device)
+        points_label = torch.tensor(points_label).to(
+            coarse_mask.device, dtype=torch.long
+        )
         points_prompt = (points_prompt, points_label)
 
         fit_boxes_prompt = torch.tensor(fit_boxes_prompt).to(coarse_mask.device)
-        boxes_label = torch.tensor(boxes_label).to(coarse_mask.device)
+        boxes_label = torch.tensor(boxes_label).to(
+            coarse_mask.device, dtype=torch.long
+        )
         fit_boxes_prompt = (fit_boxes_prompt, boxes_label)
 
         if israndom:

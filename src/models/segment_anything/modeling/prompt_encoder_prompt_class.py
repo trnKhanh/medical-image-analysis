@@ -93,27 +93,6 @@ class PromptEncoder_prompt_class(nn.Module):
         point_embedding[labels == 2] += self.point_embeddings[2].weight
         point_embedding[labels == 3] += self.point_embeddings[3].weight
         return point_embedding
-    #
-    # def _embed_boxes(self, boxes: torch.Tensor) -> torch.Tensor:
-    #     """Embeds box prompts."""
-    #     boxes = boxes + 0.5  # Shift to center of pixel
-    #     _, c, _ = boxes.shape
-    #     if c == 1:
-    #         coords = boxes.reshape(-1, 2, 2)
-    #         corner_embedding = self.pe_layer.forward_with_coords(coords, self.input_image_size)
-    #         corner_embedding[:, 0, :] += self.point_embeddings[-2].weight
-    #         corner_embedding[:, 1, :] += self.point_embeddings[-1].weight
-    #     else:
-    #         coords = boxes[:,0,:].reshape(-1, 2, 2)
-    #         corner_embedding = self.pe_layer.forward_with_coords(coords, self.input_image_size)
-    #         corner_embedding[:, 0, :] += self.point_embeddings[-2].weight
-    #         corner_embedding[:, 1, :] += self.point_embeddings[-1].weight
-    #
-    #         for i in range(1,c):
-    #             coords = boxes[:,i,:].reshape(-1, 2, 2)
-    #             corner_embedding += self.pe_layer.forward_with_coords(coords, self.input_image_size)
-    #             
-    #     return corner_embedding
 
     def _embed_boxes(self, boxes: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         """Embeds box prompts."""
