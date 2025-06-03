@@ -90,7 +90,7 @@ class RandomBrightness(BaseTransform):
         image = image_to_tensor(data["image"])
         label = image_to_tensor(data["label"])
 
-        data = self.fn(data)
+        image = self.fn(image)
 
         data["image"] = image
         data["label"] = label

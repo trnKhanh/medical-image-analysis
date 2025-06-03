@@ -12,13 +12,18 @@ class PolyLRScheduler(_LRScheduler):
         warmup_steps: int,
         exponent: float = 0.9,
         current_step: int | None = None,
+        interval: int = 1,
     ):
         self.optimizer = optimizer
         self.initial_lr = initial_lr
         self.max_steps = max_steps
         self.warmup_steps = warmup_steps
         self.exponent = exponent
+        self.interval = interval
         self.ctr = 0
+
+        self._adjusted_warmup_steps = self.warmup_steps // self.interval
+        self._adjusted_max_steps = self.max_steps // self.interval
         super().__init__(
             optimizer, current_step if current_step is not None else -1
         )
@@ -28,14 +33,17 @@ class PolyLRScheduler(_LRScheduler):
             epoch = self.ctr
             self.ctr += 1
 
-        if epoch < self.warmup_steps:
-            new_lr = self.initial_lr * (epoch + 1) / self.warmup_steps
+        step_index = epoch // self.interval
+
+        if step_index < self._adjusted_warmup_steps:
+            new_lr = self.initial_lr * (step_index + 1) / self._adjusted_warmup_steps
         else:
-            real_epoch = epoch - self.warmup_steps
+            step_index = step_index - self._adjusted_warmup_steps
+            real_max_steps = self._adjusted_max_steps - self._adjusted_warmup_steps
 
             new_lr = (
                 self.initial_lr
-                * (1.0 - real_epoch / self.max_steps) ** self.exponent
+                * (1.0 - step_index / real_max_steps) ** self.exponent
             )
 
         for param_group in self.optimizer.param_groups:

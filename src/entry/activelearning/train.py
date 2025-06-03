@@ -11,9 +11,16 @@ def parse_args():
     parser.add_argument("--seed", default=1337, type=int)
     parser.add_argument("--test-only", action="store_true")
     parser.add_argument("--resume", default=None, type=str)
+    parser.add_argument(
+        "--deterministic", dest="deterministic", action="store_true"
+    )
+    parser.add_argument("--init-round-path", default=None, type=str)
+    parser.add_argument("--init-data-list", default=None, type=str)
 
     # >>> Model parameters
+    parser.add_argument("--in-channels", default=1, type=int)
     parser.add_argument("--num-classes", default=3, type=int)
+    parser.add_argument("--postprocess-mask", action="store_true")
     parser.add_argument("--block-type", default="plain", type=str)
     parser.add_argument("--block-normalization", default="batch", type=str)
     parser.add_argument("--dropout-prob", default=0.1, type=float)
@@ -27,25 +34,40 @@ def parse_args():
     # >>> Data parameters
     parser.add_argument("--dataset", default="ACDC", type=str)
     parser.add_argument("--data-path", required=True, type=str)
+    parser.add_argument("--do-oversample", action="store_true")
     parser.add_argument("--do-augment", action="store_true")
     parser.add_argument("--do-normalize", action="store_true")
     parser.add_argument("--batch-size", default=12, type=int)
+    parser.add_argument("--valid-batch-size", default=1, type=int)
     parser.add_argument("--num-workers", default=1, type=int)
     parser.add_argument("--pin-memory", action="store_true")
     # <<< Data parameters
 
     # >>> Training parameters
+    parser.add_argument(
+        "--supervise", dest="active_learning", action="store_false"
+    )
     parser.add_argument("--valid-mode", default="volumn", type=str)
     parser.add_argument("--num-rounds", default=5, type=int)
     parser.add_argument("--budget", default=10, type=int)
+    parser.add_argument("--persist-model-weight", action="store_true")
     parser.add_argument("--active-selector", default="random", type=str)
+    parser.add_argument("--feature-path", default=None, type=str)
+    parser.add_argument("--loaded-feature-weight", default=0.0, type=float)
+    parser.add_argument("--loaded-feature-only", action="store_true")
+    parser.add_argument("--coreset-criteria", default="min", choices=["min", "mean"])
+    parser.add_argument("--coreset-fusion", default="add", choices=["add", "cat"])
+    parser.add_argument("--kmean-sharp-factor", default=1.0, type=float)
+    parser.add_argument("--kmean-softmax", action="store_true")
     parser.add_argument("--optimizer", default="adam", type=str)
     parser.add_argument("--weight-decay", default=5e-4, type=float)
+    parser.add_argument("--min-iter", default=0, type=int)
     parser.add_argument("--num-iters", default=4000, type=int)
-    parser.add_argument("--start-lr", default=1e-3, type=int)
+    parser.add_argument("--start-lr", default=1e-3, type=float)
     parser.add_argument("--lr-scheduler", default="poly", type=str)
+    parser.add_argument("--lr-interval", default=1, type=int)
     parser.add_argument("--lr-warmup-iter", default=250, type=int)
-    parser.add_argument("--save-freq-epoch", default=100, type=int)
+    parser.add_argument("--save-freq-epoch", default=None, type=int)
     parser.add_argument("--valid-freq-iter", default=200, type=int)
     parser.add_argument("--save-metric", default="dice", type=str)
     parser.add_argument("--loss", default="dice+ce", type=str)

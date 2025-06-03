@@ -16,7 +16,7 @@ import torch.nn.functional as N
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
 
-from medpy import metric
+from medpy import metric as medpy_metric
 
 import numpy as np
 import pandas as pd
@@ -29,14 +29,23 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
-from datasets import ACDCDataset, ActiveDataset, ExtendableDataset
+from datasets import (
+    ACDCDataset,
+    ActiveDataset,
+    ExtendableDataset,
+    TN3KDataset,
+    TG3KDataset,
+    FUGCDataset,
+    BUSIDataset,
+)
 from losses.compound_losses import DiceAndCELoss
 from losses.dice_loss import DiceLoss
 from scheduler.lr_scheduler import PolyLRScheduler
 
 from utils import get_path, draw_mask, dummy_context
 
-from models.unet import UNet
+from models.unet import UNet, UnetProcessor
+from models._unet import _UNet
 
 from transforms.normalization import ZScoreNormalize
 from transforms.image_transform import (
@@ -68,7 +77,11 @@ from activelearning import (
     ConfidenceSelector,
     MarginSelector,
     CoresetSelector,
+    KMeanSelector,
+    BADGESelector,
 )
+
+from metric import cal_hd
 
 
 class ALConfig(object):
@@ -85,9 +98,12 @@ class ALConfig(object):
     def __init__(
         self,
         seed: int = 12345,
+        init_round_path: str | Path | None = None,
+        init_data_list: str | Path | None = None,
         # Model parameters
         in_channels: int = 1,
         num_classes: int = 3,
+        postprocess_mask: bool = False,
         block_type: Literal["plain"] = "plain",
         block_normalization: Literal["batch", "instance"] = "batch",
         dropout_prob: float = 0.1,
@@ -97,16 +113,20 @@ class ALConfig(object):
         image_size: int | tuple[int, int] | None = None,
         model_ckpt: Path | str | None = None,
         # Data parameters
-        dataset: Literal["ACDC"] = "ACDC",
+        dataset: Literal["ACDC", "tn3k", "tg3k", "fugc", "busi"] = "ACDC",
         data_path: Path | str = "data",
+        do_oversample: bool = False,
         do_augment: bool = False,
         do_normalize: bool = False,
         batch_size: int = 32,
+        valid_batch_size: int = 1,
         num_workers: int = 1,
         pin_memory: bool = True,
         # Training parameters
+        active_learning: bool = True,
         num_rounds: int = 5,
         budget: int = 10,
+        persist_model_weight: bool = False,
         active_selector_name: Literal[
             "random",
             "entropy",
@@ -114,15 +134,27 @@ class ALConfig(object):
             "margin",
             "coreset-l2",
             "coreset-cosine",
+            "kmean-l2",
+            "kmean-cosine",
+            "badge",
         ] = "random",
+        coreset_criteria: Literal["min", "mean"] = "min",
+        coreset_fusion: Literal["add", "cat"] = "add",
+        kmean_sharp_factor: float = 1.0,
+        kmean_softmax: bool = False,
+        feature_path: Path | str | None = None,
+        loaded_feature_weight: float = 0.0,
+        loaded_feature_only: bool = False,
         optimizer_name: Literal["adam", "adamw", "sgd"] = "adamw",
         optimizer_kwargs: dict = {},
         grad_norm: float = 10.0,
+        min_iter: int = 0,
         num_iters: int = 4000,
         start_lr: float = 1e-3,
         lr_scheduler_name: Literal["poly", "none"] = "poly",
+        lr_interval: int = 1,
         lr_warmup_iter: int = 5000,
-        save_freq_epoch: int = 100,
+        save_freq_epoch: int | None = None,
         valid_freq_iter: int = 200,
         valid_mode: Literal["volumn", "slice"] = "volumn",
         save_metric_name: Literal["dice", "hd", "loss"] = "dice",
@@ -140,10 +172,13 @@ class ALConfig(object):
         self._config_dict = {}
 
         self.seed = seed
+        self.init_round_path = init_round_path
+        self.init_data_list = init_data_list
 
         # >>> Model parameters
         self.in_channels = in_channels
         self.num_classes = num_classes
+        self.postprocess_mask = postprocess_mask
         self.block_type = block_type
         self.block_normalization = block_normalization
         self.dropout_prob = dropout_prob
@@ -166,23 +201,42 @@ class ALConfig(object):
         # >>> Data parameters
         self.dataset = dataset
         self.data_path = data_path
+        self.do_oversample = do_oversample
         self.do_augment = do_augment
         self.do_normalize = do_normalize
         self.batch_size = batch_size
+        self.valid_batch_size = valid_batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         # <<< Data parameters
 
         # >>> Training parameters
-        self.num_rounds = num_rounds
-        self.budget = budget
+        self.active_learning = active_learning
+        if self.active_learning:
+            self.num_rounds = num_rounds
+            self.budget = budget
+        else:
+            self.num_rounds = 1
+            self.budget = -1
+
+        self.persist_model_weight = persist_model_weight
+
         self.active_selector_name = active_selector_name
+        self.coreset_criteria = coreset_criteria
+        self.coreset_fusion = coreset_fusion
+        self.kmean_sharp_factor = kmean_sharp_factor
+        self.kmean_softmax = kmean_softmax
+        self.feature_path = feature_path
+        self.loaded_feature_weight = loaded_feature_weight
+        self.loaded_feature_only = loaded_feature_only
         self.optimizer_name = optimizer_name
         self.optimizer_kwargs = optimizer_kwargs
         self.grad_norm = grad_norm
         self.num_iters = num_iters
+        self.min_iter = min_iter
         self.start_lr = start_lr
         self.lr_scheduler_name = lr_scheduler_name
+        self.lr_interval = lr_interval
         self.lr_warmup_iter = lr_warmup_iter
         self.save_freq_epoch = save_freq_epoch
         self.valid_freq_iter = valid_freq_iter
@@ -238,6 +292,7 @@ class ALTrainer(BaseTrainer):
     def __init__(
         self,
         work_path: Path | str = Path.cwd(),
+        deterministic: bool = True,
         device: torch.device | str = torch.device("cuda"),
         config: ALConfig | dict | str | Path | None = None,
         resume: str | Path | None = None,
@@ -259,6 +314,13 @@ class ALTrainer(BaseTrainer):
             self.config = ALConfig().load(config)
         else:
             self.config = ALConfig()
+
+        self.deterministic = deterministic
+
+        if self.deterministic:
+            print("Change cudnn backend to deterministic")
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
 
         self.work_path = get_path(work_path)
         self.device = torch.device("cpu")
@@ -282,6 +344,7 @@ class ALTrainer(BaseTrainer):
         # <<< Log parameters
 
     def initialize(self):
+
         self._set_snapshot_work_dir()
         self._setup_wandb()
         self._setup_logger()
@@ -292,8 +355,9 @@ class ALTrainer(BaseTrainer):
     def _set_snapshot_work_dir(self):
         current_time_str = datetime.now().strftime("%Y%m%d_%H")
         snapshot_list = [
-            f"ACDC",
+            f"{self.config.dataset}",
             f"{current_time_str}",
+            f"al-{self.config.active_learning}",
             f"round-{self.config.num_rounds}",
             f"budget-{self.config.budget}",
             f"selector-{self.config.active_selector_name}",
@@ -359,7 +423,8 @@ class ALTrainer(BaseTrainer):
         self.logger.setLevel(logging.DEBUG)
 
         self._setup_log_file()
-        self._setup_log_shell()
+        if self.verbose:
+            self._setup_log_shell()
 
     def _setup_log_file(self):
         assert self.logger is not None
@@ -448,6 +513,7 @@ class ALTrainer(BaseTrainer):
             dropout_prob=self.config.dropout_prob,
             normalization=self.config.block_normalization,
         )
+        self.model_processor = UnetProcessor(image_size=self.config.image_size)
 
         if self.config.model_ckpt:
             self.load_model_checkpoint(self.config.model_ckpt)
@@ -458,9 +524,12 @@ class ALTrainer(BaseTrainer):
 
         try:
             state_dict = torch.load(ckpt, map_location=self.device)
-            self.model.load_state_dict(state_dict)
+            if "model" in state_dict:
+                self.model.load_state_dict(state_dict["model"])
+            else:
+                self.model.load_state_dict(state_dict)
 
-            self.logger.info(f"Loaded model checkpoint to {ckpt}")
+            self.logger.info(f"Loaded model checkpoint from {ckpt}")
         except Exception as e:
             self.logger.warn(f"Failed to load model checkpoint from {ckpt}")
             self.logger.exception(e)
@@ -477,42 +546,91 @@ class ALTrainer(BaseTrainer):
             self.logger.warn(f"Failed to save model checkpoint to {ckpt}")
             self.logger.exception(e)
 
+    def get_dataset(
+        self,
+        split: Literal["train", "valid", "test"],
+        include_transform: bool = False,
+    ):
+        if split == "train":
+            _transform = self._get_train_transform()
+            _normalize = self._get_train_normalize()
+            _image_size = self.config.image_size
+        else:
+            _transform = self._get_valid_transform()
+            _normalize = self._get_valid_normalize()
+            _image_size = None
+
+        if not include_transform:
+            _transform = None
+
+        if self.config.dataset == "ACDC":
+            dataset = ACDCDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        elif self.config.dataset == "tn3k":
+            dataset = TN3KDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        elif self.config.dataset == "tg3k":
+            dataset = TG3KDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        elif self.config.dataset == "fugc":
+            dataset = FUGCDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        elif self.config.dataset == "busi":
+            dataset = BUSIDataset(
+                data_path=self.config.data_path,
+                split=split,
+                normalize=_normalize,
+                transform=_transform,
+                logger=self.logger,
+                image_channels=self.config.in_channels,
+                image_size=_image_size,
+            )
+        else:
+            raise ValueError(f"{self.config.dataset} dataset is undefined")
+
+        return dataset
+
     def get_data(self):
-        labeled_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="train",
-            normalize=self._get_train_normalize(),
-            transform=self._get_train_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-            image_size=self.config.image_size,
-        )
-        pool_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="train",
-            normalize=self._get_train_normalize(),
-            transform=None,
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-            image_size=self.config.image_size,
-        )
+        labeled_dataset = self.get_dataset("train", include_transform=True)
+        pool_dataset = self.get_dataset("train", include_transform=False)
+        valid_dataset = self.get_dataset("valid", include_transform=True)
+
         ex_labeled_dataset = ExtendableDataset(labeled_dataset, [])
         ex_pool_dataset = ExtendableDataset(pool_dataset)
 
         active_dataset = ActiveDataset(ex_labeled_dataset, ex_pool_dataset)
 
-        valid_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="valid",
-            normalize=self._get_valid_normalize(),
-            transform=self._get_valid_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-        )
-
         valid_dataloader = DataLoader(
             dataset=valid_dataset,
-            batch_size=1,
+            batch_size=self.config.valid_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=1,
@@ -531,17 +649,18 @@ class ALTrainer(BaseTrainer):
         train_dataset = active_dataset.get_train_dataset()
         oversampled_dataset = deepcopy(train_dataset)
 
-        total_seen_samples = self.config.num_iters * self.config.batch_size
-        num_extended = int(np.ceil(total_seen_samples / len(train_dataset)))
-        oversampled_dataset.image_idx = (
-            oversampled_dataset.image_idx * num_extended
-        )
+        if self.config.do_oversample:
+            total_seen_samples = self.config.num_iters * self.config.batch_size
+            num_extended = int(np.ceil(self.config.batch_size / len(train_dataset)))
+            oversampled_dataset.image_idx = (
+                oversampled_dataset.image_idx * num_extended
+            )
 
         train_dataloader = DataLoader(
             dataset=oversampled_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
-            drop_last=False,
+            drop_last=True,
             num_workers=self.config.num_workers,
             pin_memory=self.config.pin_memory,
             worker_init_fn=_worker_init_fn,
@@ -551,22 +670,51 @@ class ALTrainer(BaseTrainer):
     def _get_train_transform(self):
         transforms = []
         if self.config.do_augment:
-            transforms.append(
-                RandomTransform(
-                    ComposeTransform(
-                        [
-                            RandomRotation90(),
-                            RandomChoiceTransform(
-                                [MirrorTransform((-2)), MirrorTransform((-1))]
-                            ),
-                        ]
-                    ),
-                    p=0.5,
+            if self.config.dataset in ["fugc", "busi"]:
+                transforms.append(
+                    RandomTransform(RandomAffine(scale=(0.7, 1.4)), p=0.2)
                 )
-            )
-            transforms.append(
-                RandomTransform(RandomAffine(degrees=(-20, 20)), p=0.5)
-            )
+                transforms.append(
+                    RandomTransform(RandomAffine(degrees=(-15, 15)), p=0.2)
+                )
+                transforms.append(
+                    RandomTransform(RandomGaussianNoise(sigma=(0, 0.1)), p=0.1)
+                )
+                transforms.append(
+                    RandomTransform(RandomGaussianBlur(sigma=(0.5, 1)), p=0.2)
+                )
+                transforms.append(
+                    RandomTransform(RandomBrightness(brightness=0.25), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(RandomContrast(contrast=0.25), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(SimulateLowRes(scale=(0.5, 1)), p=0.15)
+                )
+                transforms.append(
+                    RandomTransform(RandomGamma(gamma=(0.7, 1.5)), p=0.1)
+                )
+            else:
+                transforms.append(
+                    RandomTransform(
+                        ComposeTransform(
+                            [
+                                RandomRotation90(),
+                                RandomChoiceTransform(
+                                    [
+                                        MirrorTransform((-2)),
+                                        MirrorTransform((-1)),
+                                    ]
+                                ),
+                            ]
+                        ),
+                        p=0.5,
+                    )
+                )
+                transforms.append(
+                    RandomTransform(RandomAffine(degrees=(-20, 20)), p=0.5)
+                )
 
         return ComposeTransform(transforms)
 
@@ -586,26 +734,27 @@ class ALTrainer(BaseTrainer):
         else:
             return None
 
-    def _get_optimizer(
+    def _setup_optimizer(
         self,
-        model: nn.Module,
     ):
-        parameters = filter(lambda p: p.requires_grad, model.parameters())
+        assert self.model is not None
+
+        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
 
         if self.config.optimizer_name == "adam":
-            optimizer = torch.optim.Adam(
+            self.optimizer = torch.optim.Adam(
                 parameters,
                 betas=(0.9, 0.999),
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "adamw":
-            optimizer = torch.optim.AdamW(
+            self.optimizer = torch.optim.AdamW(
                 parameters,
                 betas=(0.9, 0.999),
                 **self.config.optimizer_kwargs,
             )
         elif self.config.optimizer_name == "sgd":
-            optimizer = torch.optim.SGD(
+            self.optimizer = torch.optim.SGD(
                 parameters,
                 momentum=0.9,
                 **self.config.optimizer_kwargs,
@@ -616,20 +765,19 @@ class ALTrainer(BaseTrainer):
             )
 
         if self.config.lr_scheduler_name == "poly":
-            lr_scheduler = PolyLRScheduler(
-                optimizer,
-                self.config.start_lr,
-                self.config.num_iters,
-                self.config.lr_warmup_iter,
+            self.lr_scheduler = PolyLRScheduler(
+                self.optimizer,
+                initial_lr=self.config.start_lr,
+                max_steps=self.config.num_iters,
+                warmup_steps=self.config.lr_warmup_iter,
+                interval=self.config.lr_interval,
             )
         elif self.config.lr_scheduler_name == "none":
-            lr_scheduler = None
+            self.lr_scheduler = None
         else:
             raise ValueError(
                 f'Learning rate scheduler "{self.config.lr_scheduler_name}" not supported'
             )
-
-        return optimizer, lr_scheduler
 
     def _setup_loss(self):
         if self.config.loss_name == "dice+ce":
@@ -656,35 +804,78 @@ class ALTrainer(BaseTrainer):
             self.active_selector = RandomSelector()
         elif self.config.active_selector_name == "entropy":
             self.active_selector = EntropySelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "confidence":
             self.active_selector = ConfidenceSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "margin":
             self.active_selector = MarginSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
             )
         elif self.config.active_selector_name == "coreset-l2":
             self.active_selector = CoresetSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
                 metric="l2",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                coreset_fusion=self.config.coreset_fusion,
             )
         elif self.config.active_selector_name == "coreset-cosine":
             self.active_selector = CoresetSelector(
-                self.config.batch_size,
-                self.config.num_workers,
-                self.config.pin_memory,
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
                 metric="cosine",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                coreset_fusion=self.config.coreset_fusion,
+            )
+        elif self.config.active_selector_name == "kmean-l2":
+            self.active_selector = KMeanSelector(
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                metric="l2",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                sharp_factor=self.config.kmean_sharp_factor,
+                softmax=self.config.kmean_softmax,
+                loaded_feature_only=self.config.loaded_feature_only,
+            )
+        elif self.config.active_selector_name == "kmean-cosine":
+            self.active_selector = KMeanSelector(
+                batch_size=self.config.batch_size,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                metric="cosine",
+                feature_path=self.config.feature_path,
+                loaded_feature_weight=self.config.loaded_feature_weight,
+                coreset_criteria=self.config.coreset_criteria,
+                sharp_factor=self.config.kmean_sharp_factor,
+                softmax=self.config.kmean_softmax,
+                loaded_feature_only=self.config.loaded_feature_only,
+            )
+        elif self.config.active_selector_name == "badge":
+            self.active_selector = BADGESelector(
+                dice_loss=self.supervised_loss.dice_loss,
+                ce_loss=self.supervised_loss.ce_loss,
+                batch_size=1,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+                multiple_loss="add",
             )
         else:
             raise ValueError(
@@ -697,6 +888,7 @@ class ALTrainer(BaseTrainer):
 
         self.logger.info(f"Training summary")
         self.logger.info("")
+        self.logger.info(f"deterministic: {self.deterministic}")
         self.logger.info(f"device: {self.device}")
         self.logger.info(f"seed: {self.seed}")
         self.logger.info(f'log_file: "{self.log_path}"')
@@ -706,6 +898,7 @@ class ALTrainer(BaseTrainer):
         self.logger.info(f"model: {self.model}")
         self.logger.info(f"  in_channels: {self.config.in_channels}")
         self.logger.info(f"  num_classes: {self.config.num_classes}")
+        self.logger.info(f"  postprocess_mask: {self.config.postprocess_mask}")
         self.logger.info(f"  block_type: {self.config.block_type}")
         self.logger.info(
             f"  block_normalization: {self.config.block_normalization}"
@@ -723,6 +916,7 @@ class ALTrainer(BaseTrainer):
             f"  active_dataset_size (slices): {self.active_dataset.get_size()}"
         )
         self.logger.info(f"  valid_size (volumns): {len(self.valid_dataset)}")
+        self.logger.info(f"  do_oversample: {self.config.do_oversample}")
         self.logger.info(f"  do_augment: {self.config.do_augment}")
         if self.config.do_augment:
             self.logger.info(
@@ -735,19 +929,39 @@ class ALTrainer(BaseTrainer):
 
         self.logger.info(f"num_rounds: {self.config.num_rounds}")
         self.logger.info(f"budget: {self.config.budget}")
+        self.logger.info(
+            f"persist_model_weight: {self.config.persist_model_weight}"
+        )
         self.logger.info(f"active_selector: {self.config.active_selector_name}")
+        if self.config.active_selector_name.startswith(
+            "coreset"
+        ) or self.config.active_selector_name.startswith("kmean"):
+            self.logger.info(
+                f"coreset_criteria: {self.config.coreset_criteria}"
+            )
+            self.logger.info(f"coreset_fusion: {self.config.coreset_fusion}")
+            self.logger.info(
+                f"kmean_sharp_factor: {self.config.kmean_sharp_factor}"
+            )
+            self.logger.info(f"kmean_softmax: {self.config.kmean_softmax}")
+        self.logger.info(f"feature_path: {self.config.feature_path}")
+        self.logger.info(
+            f"loaded_feature_weight: {self.config.loaded_feature_weight}"
+        )
         self.logger.info(f"valid_mode: {self.config.valid_mode}")
         self.logger.info(f"optimizer: {self.config.optimizer_name}")
         self.logger.info(f"  lr_warmup_iter: {self.config.lr_warmup_iter}")
         self.logger.info(f"  lr_scheduler: {self.config.lr_scheduler_name}")
         self.logger.info(f"  start_lr: {self.config.start_lr}")
         self.logger.info(f"  optimizer_kwargs: {self.config.optimizer_kwargs}")
+        self.logger.info(f"  instance: {self.optimizer}")
         self.logger.info(f"loss_fn: {self.config.loss_name}")
         self.logger.info(f"save_metric: {self.config.save_metric_name}")
         self.logger.info(
             f"early_stop_max_patience: {self.config.early_stop_max_patience}"
         )
         self.logger.info(f"start_epoch: {self.current_epoch}")
+        self.logger.info(f"min_iter: {self.config.min_iter}")
         self.logger.info(f"num_iters: {self.config.num_iters}")
         self.logger.info(f"save_freq_epoch: {self.config.save_freq_epoch}")
         self.logger.info(f"valid_freq_iter: {self.config.valid_freq_iter}")
@@ -774,6 +988,7 @@ class ALTrainer(BaseTrainer):
             self.valid_dataloader,
         ) = self.get_data()
 
+        self._setup_optimizer()
         self._setup_loss()
         self._setup_active_selector()
 
@@ -797,6 +1012,16 @@ class ALTrainer(BaseTrainer):
         self._print_train_info()
         self._check_data_sanity()
 
+        if self.config.init_round_path:
+            round_0_path = get_path(self.config.init_round_path)
+
+            self.load_model_checkpoint(round_0_path / "best_model/model.pth")
+            self.active_dataset.load_data_list(round_0_path / "data_list.json")
+
+            self.perform_real_test()
+
+            self.current_round = 1
+
     def _check_data_sanity(self):
         sanity_path = self.work_path / "sanity"
         sanity_path.mkdir(parents=True, exist_ok=True)
@@ -816,20 +1041,50 @@ class ALTrainer(BaseTrainer):
     def on_round_start(self):
         assert self.model is not None
 
-        if self.config.model_ckpt:
-            self.load_model_checkpoint(self.config.model_ckpt)
-
-        self.model.train()
-        self.model.to(self.device)
-
         data_list_path = (
             self.work_path / f"round_{self.current_round}/data_list.json"
         )
+        # Load model from last round to select label
+        if self.current_round > 0:
+            last_ckpt = (
+                self.work_path
+                / f"round_{self.current_round-1}/best_model/model.pth"
+            )
 
-        new_samples = self.active_selector.select_next_batch(
-            self.active_dataset, self.config.budget, self.model, self.device
-        )
-        self.active_dataset.extend_train_set(new_samples)
+            if self.current_round > 1 or self.config.init_round_path is None:
+                self.load_model_checkpoint(last_ckpt)
+
+        if self.config.active_learning:
+            if self.current_round == 0 and self.config.init_data_list:
+                self.active_dataset.load_data_list(self.config.init_data_list)
+            else:
+                new_samples = self.active_selector.select_next_batch(
+                    self.active_dataset,
+                    self.config.budget,
+                    self.model,
+                    self.device,
+                )
+
+                self.active_dataset.extend_train_set(new_samples)
+        else:
+            pool_samples = deepcopy(self.active_dataset.pool_dataset.image_idx)
+            self.active_dataset.extend_train_set(pool_samples)
+
+        # Loading model must be placed after selecting samples since we use the
+        # model to choose samples
+        if self.current_round > 0:
+            self._build_model()
+            if self.config.persist_model_weight and (
+                self.current_round > 1 or self.config.init_round_path is None
+            ):
+                self.load_model_checkpoint(
+                    self.work_path
+                    / f"round_{self.current_round-1}/best_model/model.pth"
+                )
+
+        self.model.to(self.device)
+        self.model.train()
+
         self.active_dataset.save_data_list(data_list_path)
         if self.use_wandb:
             self.wandb_runner.log_artifact(
@@ -845,9 +1100,7 @@ class ALTrainer(BaseTrainer):
         self.current_iter = 0
         self.current_patience = 0
 
-        self.optimizer, self.lr_scheduler = self._get_optimizer(
-            self.model,
-        )
+        self._setup_optimizer()
 
         default_metric = torch.tensor(
             -torch.inf if self.config.maximum_save_metric else torch.inf
@@ -869,11 +1122,18 @@ class ALTrainer(BaseTrainer):
                 ckpt_path,
                 name=f"model_{self.wandb_runner.id}",
                 aliases=[
-                    f"epoch_{self.current_epoch}",
-                    "final",
                     f"round_{self.current_round}",
                 ],
             )
+            if self.use_wandb:
+                self.wandb_runner.log_model(
+                    ckpt_path,
+                    name=f"best_model_{self.wandb_runner.id}",
+                    aliases=[
+                        f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
+                        f"round_{self.current_round}",
+                    ],
+                )
 
         self.load_model_checkpoint(
             self.work_path / f"round_{self.current_round}/best_model/model.pth"
@@ -910,7 +1170,10 @@ class ALTrainer(BaseTrainer):
         self.model.train()
 
     def on_train_epoch_end(self):
-        if (self.current_epoch + 1) % self.config.save_freq_epoch == 0:
+        if (
+            self.config.save_freq_epoch
+            and (self.current_epoch + 1) % self.config.save_freq_epoch == 0
+        ):
             ckpt_path = (
                 self.work_path
                 / f"round_{self.current_round}/epoch_{self.current_epoch}"
@@ -961,33 +1224,40 @@ class ALTrainer(BaseTrainer):
             return old_metric > new_metric
 
     def on_valid_epoch_end(self):
-        metric = torch.stack(
-            [o["metric"][:, :] for o in self.epoch_valid_outputs]
+        avg_metric_all = torch.cat(
+            [o["metric_all"] for o in self.epoch_valid_outputs], dim=0
+        ).nanmean(0)
+        avg_metric_per_cls = torch.cat(
+            [o["metric"] for o in self.epoch_valid_outputs], dim=0
         ).nanmean(0)
         loss = torch.stack(
             [o["loss"] for o in self.epoch_valid_outputs]
         ).nanmean()
 
-        dsc_per_class = metric[:, 0]
+        dsc_per_class = avg_metric_per_cls[:, 0]
         avg_dsc = dsc_per_class.mean()
 
-        hd_per_class = metric[:, 1]
+        hd_per_class = avg_metric_per_cls[:, 1]
         avg_hd = hd_per_class.nanmean()
 
-        asd_per_class = metric[:, 2]
+        asd_per_class = avg_metric_per_cls[:, 2]
         avg_asd = asd_per_class.mean()
 
-        jc_per_class = metric[:, 3]
+        jc_per_class = avg_metric_per_cls[:, 3]
         avg_jc = jc_per_class.nanmean()
 
-        self.logger.info(f"DSC per class: {dsc_per_class.tolist()}")
-        self.logger.info(f"HD per class: {hd_per_class.tolist()}")
-        self.logger.info(f"ASD per class: {asd_per_class.tolist()}")
-        self.logger.info(f"JC per class: {jc_per_class.tolist()}")
-        self.logger.info(f"avg DSC: {avg_dsc.item()}")
-        self.logger.info(f"avg HD: {avg_hd.item()}")
-        self.logger.info(f"avg ASD: {avg_asd.item()}")
-        self.logger.info(f"avg JC: {avg_jc.item()}")
+        classes = self.valid_dataset.CLASSES
+
+        self.logger.info("Valid results (DSC, HD, ASD, JSD):")
+        for id in classes.keys():
+            if id == 0:
+                self.logger.info(f"  all: {avg_metric_all.tolist()}")
+            else:
+                self.logger.info(
+                    f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
+                )
+
+        self.logger.info(f"Average: {avg_metric_per_cls.nanmean(0).tolist()}")
         self.logger.info(f"loss: {loss.item()}")
 
         if self.config.save_metric_name == "dice":
@@ -1004,7 +1274,7 @@ class ALTrainer(BaseTrainer):
         if self.use_wandb:
             valid_metric = {
                 f"round_{self.current_round}/valid/metric/dsc": avg_dsc.item(),
-                f"round_{self.current_round}/valid/metric/hd95": avg_hd.item(),
+                f"round_{self.current_round}/valid/metric/hd": avg_hd.item(),
                 f"round_{self.current_round}/valid/metric/loss": loss.item(),
                 f"round_{self.current_round}_train_epoch": self.current_epoch,
                 f"round_{self.current_round}_train_iter": self.current_iter,
@@ -1034,16 +1304,6 @@ class ALTrainer(BaseTrainer):
             )
             self.save_state_dict(ckpt_path)
 
-            if self.use_wandb:
-                self.wandb_runner.log_model(
-                    ckpt_path,
-                    name=f"best_model_{self.wandb_runner.id}",
-                    aliases=[
-                        f"iter_{self.current_iter}",
-                        f"{self.config.save_metric_name}_{self._best_valid_metric:.4f}",
-                        f"round_{self.current_round}",
-                    ],
-                )
             is_improved = True
 
         if is_improved:
@@ -1108,6 +1368,7 @@ class ALTrainer(BaseTrainer):
         ), label_batch.to(self.device, dtype=torch.long)
 
         output = self.model(image_batch)
+
         loss = self.supervised_loss(output, label_batch)
 
         self.optimizer.zero_grad()
@@ -1139,22 +1400,19 @@ class ALTrainer(BaseTrainer):
 
     def valid_step(self, sampled_batch):
         if self.config.valid_mode == "volumn":
-            metric, loss = self.valid_volumns(sampled_batch)
+            metric_all, metric, loss = self.valid_volumns(sampled_batch)
         else:
-            metric, loss = self.valid_slices(sampled_batch)
+            metric_all, metric, loss = self.valid_slices(sampled_batch)
 
         self.epoch_valid_outputs.append(
             {
+                "metric_all": torch.Tensor(metric_all),
                 "metric": torch.Tensor(metric),
                 "loss": loss,
             }
         )
 
-    def valid_slices(self, sampled_batch, spacing=None):
-        spacing = (
-            sampled_batch["spacing"] if "spacing" in sampled_batch else None
-        )
-
+    def valid_slices(self, sampled_batch):
         image_batch, label_batch = (
             sampled_batch["image"],
             sampled_batch["label"],
@@ -1166,23 +1424,13 @@ class ALTrainer(BaseTrainer):
             self.device
         )
 
-        if self.config.image_size is not None:
-            image_batch = F.resize(
-                image_batch,
-                list(self.config.image_size),
-                interpolation=F.InterpolationMode.BILINEAR,
-            )
+        image_batch = self.model_processor.preprocess(image_batch)
 
         output = self.model(image_batch)
         prob = output.softmax(1)
         pred = prob.argmax(1)
 
         if pred.shape[-2:] != label_batch.shape[-2:]:
-            pred = F.resize(
-                pred,
-                size=label_batch.shape[-2:],
-                interpolation=F.InterpolationMode.NEAREST,
-            )
             loss_label_batch = F.resize(
                 label_batch,
                 size=output.shape[-2:],
@@ -1190,6 +1438,12 @@ class ALTrainer(BaseTrainer):
             )
         else:
             loss_label_batch = label_batch
+
+        pred = self.model_processor.postprocess(
+            pred,
+            label_batch.shape[-2:],
+            do_denoise=self.config.postprocess_mask,
+        )
 
         if hasattr(self, "supervised_loss"):
             loss = self.supervised_loss(output, loss_label_batch)
@@ -1199,25 +1453,33 @@ class ALTrainer(BaseTrainer):
         pred = pred.cpu().numpy()
         label_batch = label_batch.cpu().numpy()
 
-        metric = np.zeros((B, self.config.num_classes, 4))
+        metric_all = np.zeros((B, 4))
+        metric_per_cls = np.zeros((B, self.config.num_classes, 4))
+
+        if "spacing" in sampled_batch:
+            spacing = sampled_batch["spacing"][0]
+            spacing = torch.roll(spacing, 1).cpu().numpy()
+        else:
+            spacing = None
 
         for b in range(B):
+            metric_all[b] = self.calculate_metric_percase(
+                pred[b] > 0, label_batch[b] > 0, spacing
+            )
             for c in range(1, self.config.num_classes + 1):
-                metric[b, c - 1] = self.calculate_metric_percase(
+                metric_per_cls[b, c - 1] = self.calculate_metric_percase(
                     pred[b] == c, label_batch[b] == c, spacing
                 )
 
-        return metric, loss
+        return metric_all, metric_per_cls, loss
 
     def valid_volumns(self, sampled_batch):
-        spacing = (
-            sampled_batch["spacing"] if "spacing" in sampled_batch else None
-        )
-
         image_batch, label_batch = (
             sampled_batch["image"],
             sampled_batch["label"],
         )  #  [1, c, d, h, w], [1, d, h, w]
+
+        assert image_batch.shape[0] == 1
 
         image_batch, label_batch = image_batch.to(self.device), label_batch.to(
             self.device
@@ -1225,23 +1487,13 @@ class ALTrainer(BaseTrainer):
         image_batch = image_batch.squeeze(0).permute(1, 0, 2, 3)  # D, C, H, W
         label_batch = label_batch.squeeze(0)  # D, H, W
 
-        if self.config.image_size is not None:
-            image_batch = F.resize(
-                image_batch,
-                list(self.config.image_size),
-                interpolation=F.InterpolationMode.BILINEAR,
-            )
+        image_batch = self.model_processor.preprocess(image_batch)
 
         output = self.model(image_batch)
         prob = output.softmax(1)
         pred = prob.argmax(1)
 
         if pred.shape[-2:] != label_batch.shape[-2:]:
-            pred = F.resize(
-                pred,
-                size=label_batch.shape[-2:],
-                interpolation=F.InterpolationMode.NEAREST,
-            )
             loss_label_batch = F.resize(
                 label_batch,
                 size=output.shape[-2:],
@@ -1249,6 +1501,12 @@ class ALTrainer(BaseTrainer):
             )
         else:
             loss_label_batch = label_batch
+
+        pred = self.model_processor.postprocess(
+            pred,
+            label_batch.shape[-2:],
+            do_denoise=self.config.postprocess_mask,
+        )
 
         if hasattr(self, "supervised_loss"):
             loss = self.supervised_loss(output, loss_label_batch)
@@ -1258,14 +1516,25 @@ class ALTrainer(BaseTrainer):
         pred = pred.cpu().numpy()
         label_batch = label_batch.cpu().numpy()
 
-        metric = np.zeros((self.config.num_classes, 4))
+        metric_all = np.zeros((1, 4))
+        metric_per_cls = np.zeros((1, self.config.num_classes, 4))
+
+        if "spacing" in sampled_batch:
+            spacing = sampled_batch["spacing"][0]
+            spacing = torch.roll(spacing, 1).cpu().numpy()
+        else:
+            spacing = None
+
+        metric_all[0] = self.calculate_metric_percase(
+            pred > 0, label_batch > 0, spacing
+        )
 
         for c in range(1, self.config.num_classes + 1):
-            metric[c - 1] = self.calculate_metric_percase(
+            metric_per_cls[0, c - 1] = self.calculate_metric_percase(
                 pred == c, label_batch == c, spacing
             )
 
-        return metric, loss
+        return metric_all, metric_per_cls, loss
 
     def calculate_metric_percase(
         self, pred: np.ndarray, gt: np.ndarray, spacing=None
@@ -1274,22 +1543,22 @@ class ALTrainer(BaseTrainer):
         gt[gt > 0] = 1
 
         dice = 0
-        hd95 = np.nan
+        hd = np.nan
         asd = np.nan
         jc = 0
 
         if pred.sum() > 0:
-            dice = metric.dc(pred, gt)
-            hd95 = metric.hd95(pred, gt, spacing)
-            asd = metric.asd(pred, gt, spacing)
-            jc = metric.jc(pred, gt)
+            dice = medpy_metric.dc(pred, gt)
+            hd = cal_hd(pred, gt, spacing)
+            asd = medpy_metric.asd(pred, gt, spacing)
+            jc = medpy_metric.jc(pred, gt)
 
-        return dice, hd95, asd, jc
+        return dice, hd, asd, jc
 
     def train(self):
         self.on_train_start()
 
-        for round in range(self.config.num_rounds):
+        while self.current_round < self.config.num_rounds:
             self.on_round_start()
             while not self.is_finished():
                 self.on_epoch_start()
@@ -1314,66 +1583,70 @@ class ALTrainer(BaseTrainer):
                 self.on_valid_epoch_end()
 
     def is_finished(self):
+        if self.current_iter < self.config.min_iter:
+            return False
+
         if self.config.early_stop_max_patience:
-            is_finished = (
-                self.current_patience >= self.config.early_stop_max_patience
-            )
-            if is_finished:
+            if self.current_patience >= self.config.early_stop_max_patience:
                 self.logger.info(
                     "Exceeded maximum patience. Training will be early stopped"
                 )
-            return is_finished
+                return True
 
         return self.current_iter >= self.config.num_iters
 
     def run_training(self):
         self.train()
 
+    @torch.no_grad()
     def perform_real_test(self):
-        test_dataset = ACDCDataset(
-            data_path=self.config.data_path,
-            split="test",
-            normalize=self._get_valid_normalize(),
-            transform=self._get_valid_transform(),
-            logger=self.logger,
-            image_channels=self.config.in_channels,
-        )
+        self.model.eval()
+        test_dataset = self.get_dataset("test", include_transform=True)
 
         test_dataloader = DataLoader(
             dataset=test_dataset,
-            batch_size=1,
+            batch_size=self.config.valid_batch_size,
             shuffle=False,
             drop_last=False,
             num_workers=1,
             pin_memory=True,
         )
 
+        metric_all_list = []
         metric_list = []
 
         for sampled_batch in tqdm(test_dataloader):
             if self.config.valid_mode == "volumn":
-                metric, _ = self.valid_volumns(sampled_batch)
+                metric_all, metric, _ = self.valid_volumns(sampled_batch)
             else:
-                metric, _ = self.valid_slices(sampled_batch)
+                metric_all, metric, _ = self.valid_slices(sampled_batch)
 
-            metric_list.append(metric)
+            metric_all_list.extend(metric_all)
+            metric_list.extend(metric)
 
+        metric_all_tensor = torch.from_numpy(
+            np.array(metric_all_list)
+        )  # N, C, 4 (DSC, HD, ASD, JSD)
         metric_tensor = torch.from_numpy(
             np.array(metric_list)
         )  # N, C, 4 (DSC, HD, ASD, JSD)
         classes = test_dataset.CLASSES
-        metric_name = {0: "DSC", 1: "HD95", 2: "ASD", 3: "JSD"}
+        metric_name = {0: "DSC", 1: "HD", 2: "ASD", 3: "JSD"}
 
         dataframe_dict = {}
         for class_id in classes.keys():
             if class_id == 0:
-                continue
-
-            for metric_id in metric_name.keys():
-                field_name = f"{classes[class_id]}-{metric_name[metric_id]}"
-                dataframe_dict[field_name] = metric_tensor[
-                    :, class_id - 1, metric_id
-                ].tolist()
+                for metric_id in metric_name.keys():
+                    field_name = f"all-{metric_name[metric_id]}"
+                    dataframe_dict[field_name] = metric_all_tensor[
+                        :, metric_id
+                    ].tolist()
+            else:
+                for metric_id in metric_name.keys():
+                    field_name = f"{classes[class_id]}-{metric_name[metric_id]}"
+                    dataframe_dict[field_name] = metric_tensor[
+                        :, class_id - 1, metric_id
+                    ].tolist()
 
         if self.use_wandb:
             wandb_table = wandb.Table(
@@ -1384,27 +1657,30 @@ class ALTrainer(BaseTrainer):
                 {f"test_performance_round_{self.current_round}": wandb_table}
             )
 
-        avg_metric_per_cls = metric_tensor.mean(0)
-        self.logger.info("Real test results:")
+        avg_metric_all = metric_all_tensor.nanmean(0)
+        avg_metric_per_cls = metric_tensor.nanmean(0)
+        self.logger.info("Real test results (DSC, HD, ASD, JSD):")
         for id in classes.keys():
             if id == 0:
-                continue
+                self.logger.info(f"  all: {avg_metric_all.tolist()}")
+            else:
+                self.logger.info(
+                    f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
+                )
 
-            self.logger.info(
-                f"  {classes[id]}: {avg_metric_per_cls[id-1].tolist()}"
-            )
-
-        self.logger.info(f"Average: {avg_metric_per_cls.mean(0).tolist()}")
+        self.logger.info(f"Average: {avg_metric_per_cls.nanmean(0).tolist()}")
 
         if self.use_wandb:
-            avg_metric = avg_metric_per_cls.mean(0)
+            avg_metric = avg_metric_per_cls.nanmean(0)
             avg_dsc = avg_metric[0]
             avg_hd = avg_metric[1]
             avg_asd = avg_metric[2]
             avg_jc = avg_metric[3]
             test_metric = {
+                f"test/metric/dsc_all": avg_metric_all[0].item(),
+                f"test/metric/hd_all": avg_metric_all[1].item(),
                 f"test/metric/dsc": avg_dsc.item(),
-                f"test/metric/hd95": avg_hd.item(),
+                f"test/metric/hd": avg_hd.item(),
                 f"test/metric/asd": avg_asd.item(),
                 f"test/metric/jc": avg_jc.item(),
                 f"round_step": self.current_round,

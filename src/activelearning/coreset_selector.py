@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 
 import torch
@@ -6,12 +7,16 @@ from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import pairwise_distances
+from sklearn.cluster import kmeans_plusplus
+import h5py
 
 from .active_selector import ActiveSelector
 from datasets.active_dataset import ActiveDataset
 
+from utils import get_path
 
-def kcenter_greedy(dist_mat, n_data, budget, init_idx):
+
+def kcenter_greedy(dist_mat, n_data, budget, init_idx, coreset_criteria="min"):
     assert (
         dist_mat.shape[0] == n_data
     ), "Size of distance matrix and number of data doesn't match!"
@@ -25,7 +30,15 @@ def kcenter_greedy(dist_mat, n_data, budget, init_idx):
     for _ in tqdm(range(budget), desc="k-center greedy"):
         mat = dist_mat[~labeled_indices, :][:, labeled_indices]
         # for all the unselected points, find its nearest neighbor in selected points
-        mat_min = mat.min(axis=1)
+        if coreset_criteria == "min":
+            mat_min = mat.min(axis=1)
+        elif coreset_criteria == "mean":
+            mat_min = mat.mean(axis=1)
+        else:
+            raise RuntimeError(
+                f"coreset_criteria {coreset_criteria} is undefined"
+            )
+
         # find nearest neighbor with largest distance as the next selected point
         q_index_ = mat_min.argmax()
         q_index = all_indices[~labeled_indices][q_index_]
@@ -46,17 +59,25 @@ class CoresetSelector(ActiveSelector):
         pin_memory: bool = True,
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
+        coreset_criteria: Literal["mean", "min"] = "min",
+        coreset_fusion: Literal["add", "cat"] = "add",
+        feature_path: Path | str | None = None,
+        loaded_feature_weight: float = 0.0,
     ) -> None:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.smooth = smooth
         self.metric = metric
+        self.feature_path = get_path(feature_path) if feature_path else None
+        self.coreset_criteria = coreset_criteria
+        self.coreset_fusion = coreset_fusion
+        self.loaded_feature_weight = loaded_feature_weight
 
     def cal_scores(
         self,
         active_dataset: ActiveDataset,
-        model: nn.Module,
+        model: nn.Module | None,
         device: torch.device,
     ):
         labeled_dataset = active_dataset.get_train_dataset()
@@ -73,22 +94,93 @@ class CoresetSelector(ActiveSelector):
             pin_memory=self.pin_memory,
         )
         feat_list = []
+        loaded_feat_list = []
 
         for sampled_batch in tqdm(dataloader):
             image_batch = sampled_batch["image"].to(device)
             case_name = sampled_batch["case_name"]
 
-            model.eval()
-            with torch.no_grad():
-                feat = model.get_enc_feature(image_batch)
-                feat = feat.cpu().numpy()
+            if model:
+                model.eval()
+                with torch.no_grad():
+                    feat = model.get_enc_feature(image_batch)
+                    feat = feat.cpu().numpy()
+                feat_list.append(feat)
 
-            feat_list.append(feat)
+            if self.feature_path:
+                for idx in range(len(case_name)):
+                    case = case_name[idx]
+                    feature_file = self.feature_path / f"{case}.h5"
+                    with h5py.File(feature_file, "r") as h5f:
+                        loaded_feat_ds = h5f["feature"]
+                        assert isinstance(loaded_feat_ds, h5py.Dataset)
+                        loaded_feat = loaded_feat_ds[:]
 
-        feats = np.concatenate(feat_list, axis=0)
-        feat_dist_mat = pairwise_distances(feats, metric=self.metric)
+                    loaded_feat_list.append(loaded_feat)
 
-        return np.array(core_list), np.array(all_list), feats, feat_dist_mat
+        if len(loaded_feat_list):
+            loaded_feats = np.stack(loaded_feat_list, axis=0)
+            loaded_feat_dist_mat = pairwise_distances(
+                loaded_feats, metric=self.metric
+            )
+        else:
+            loaded_feats = None
+            loaded_feat_dist_mat = 0
+
+        if len(feat_list):
+            feats = np.concatenate(feat_list, axis=0)
+            feat_dist_mat = pairwise_distances(feats, metric=self.metric)
+        else:
+            feats = None
+            feat_dist_mat = 0
+
+        if self.coreset_fusion == "add":
+            final_dist_mat = 0
+
+            if loaded_feats is not None:
+                loaded_feat_dist = pairwise_distances(
+                    loaded_feats, metric=self.metric
+                )
+                loaded_feat_dist /= loaded_feat_dist.sum()
+
+                final_dist_mat = (
+                    final_dist_mat
+                    + self.loaded_feature_weight * loaded_feat_dist
+                )
+
+            if feats is not None:
+                feat_dist = pairwise_distances(feats, metric=self.metric)
+                feat_dist /= feat_dist.sum()
+
+                final_dist_mat = final_dist_mat + (
+                    1 - self.loaded_feature_weight
+                ) * feat_dist
+        else:
+            final_feat_list = []
+
+            if feats is not None:
+                final_feat_list.append(feats)
+
+            if loaded_feats is not None:
+                if feats is None:
+                    scale_factor = 1
+                else:
+                    D1 = feats.shape[-1]
+                    D2 = loaded_feats.shape[-1]
+                    scale_factor = np.sqrt(D1 / D2 * self.loaded_feature_weight)
+
+                final_feat_list.append(loaded_feats * scale_factor)
+
+            final_feats = np.concatenate(final_feat_list, axis=1)
+            final_dist_mat = pairwise_distances(final_feats, metric=self.metric)
+
+        return (
+            np.array(core_list),
+            np.array(all_list),
+            loaded_feats,
+            feats,
+            final_dist_mat,
+        )
 
     def select_next_batch(
         self,
@@ -98,7 +190,7 @@ class CoresetSelector(ActiveSelector):
         device: torch.device,
     ):
         labeled_size, pool_size = active_dataset.get_size()
-        if labeled_size == 0:
+        if labeled_size == 0 and self.loaded_feature_weight == 0:
             scores = torch.rand(pool_size)
 
             _, indices = torch.sort(scores, descending=True)
@@ -106,20 +198,35 @@ class CoresetSelector(ActiveSelector):
                 active_dataset.pool_dataset.image_idx[id]
                 for id in indices[:select_num]
             ]
+        elif labeled_size == 0:
+            if self.feature_path:
+                core_list, all_list, loaded_feats, feats, feat_dist_mat = (
+                    self.cal_scores(active_dataset, None, device)
+                )
+                _, selected_indices = kmeans_plusplus(
+                    X=loaded_feats, n_clusters=select_num
+                )
+                selected_samples = list(all_list[selected_indices])
+            else:
+                scores = torch.rand(pool_size)
+
+                _, indices = torch.sort(scores, descending=True)
+                selected_samples = [
+                    active_dataset.pool_dataset.image_idx[id]
+                    for id in indices[:select_num]
+                ]
         else:
-            core_list, all_list, feats, feat_dist_mat = self.cal_scores(
-                active_dataset, model, device
+            core_list, all_list, loaded_feats, feats, feat_dist_mat = (
+                self.cal_scores(active_dataset, model, device)
             )
             selected_sample_ids = kcenter_greedy(
                 dist_mat=feat_dist_mat,
                 n_data=len(all_list),
                 budget=select_num,
                 init_idx=np.arange(len(core_list)),
+                coreset_criteria=self.coreset_criteria,
             )
 
-            selected_samples = all_list[selected_sample_ids]
-
-            for x in selected_samples:
-                assert x not in core_list
+            selected_samples = list(all_list[selected_sample_ids])
 
         return selected_samples

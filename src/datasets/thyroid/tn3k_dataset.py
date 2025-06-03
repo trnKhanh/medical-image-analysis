@@ -1,38 +1,44 @@
-from typing import Callable, Literal, Any
-from pathlib import Path
-from logging import Logger
+import itertools
 import json
+from logging import Logger
+from pathlib import Path
+from typing import Literal, Callable, Any
 
+import h5py
+import numpy as np
 import torch
+from torch.utils.data.sampler import Sampler
 import torchvision.transforms.functional as F
 from PIL import Image
 
-from datasets.basedataset import BaseDataset
-from transforms.joint_transform import JointResize
+import pandas as pd
+
+from ..basedataset import BaseDataset
 from utils import get_path
+from transforms.joint_transform import JointResize
 
 
-class FUGCDataset(BaseDataset):
-    CLASSES = {0: "bg", 1: "anterior lip", 2: "posterior lip"}
+class TN3KDataset(BaseDataset):
+    CLASSES = {0: "bg", 1: "thyroid"}
 
-    TRAIN_DIR = "train"
-    VALID_DIR = "val"
-    TEST_DIR = "test"
+    TEST_IMAGES_DIR = "test-image"
+    TEST_LABELS_DIR = "test-mask"
 
-    IMAGES_DIR = "images"
-    LABELS_DIR = "labels"
+    TRAINVAL_IMAGES_DIR = "trainval-image"
+    TRAINVAL_LABELS_DIR = "trainval-mask"
+    TRAINVAL_SPLIT_FORMAT = "tn3k-trainval-fold{}.json"
 
-    NUM_CLASSES = 2
+    NUM_CLASSES = 1
 
     @staticmethod
     def find_samples(
         data_path: Path | str, require_label: bool = True
     ) -> list[dict]:
         data_path = get_path(data_path)
-        images_dir = data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.IMAGES_DIR
-        labels_dir = data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.LABELS_DIR
+        images_dir = data_path / TN3KDataset.TRAINVAL_IMAGES_DIR
+        labels_dir = data_path / TN3KDataset.TRAINVAL_LABELS_DIR
         samples_list = []
-        for image_path in images_dir.glob("*.png"):
+        for image_path in images_dir.glob("*.jpg"):
             if not image_path.is_file():
                 continue
 
@@ -89,24 +95,33 @@ class FUGCDataset(BaseDataset):
             return JointResize(self.image_size)
 
     def _register_samples(self):
-        if self.split == "train":
-            images_path = (
-                self.data_path / FUGCDataset.TRAIN_DIR / FUGCDataset.IMAGES_DIR
-            )
-        elif self.split == "valid":
-            images_path = (
-                self.data_path / FUGCDataset.VALID_DIR / FUGCDataset.IMAGES_DIR
-            )
-        elif self.split == "test":
-            images_path = (
-                self.data_path / FUGCDataset.TEST_DIR / FUGCDataset.IMAGES_DIR
-            )
-        else:
-            raise ValueError(f"FUGCDataset does not have {self.split} split")
+        split_file = self.data_path / TN3KDataset.TRAINVAL_SPLIT_FORMAT.format(
+            self.fold
+        )
+        with open(split_file, "r") as f:
+            split_dict = json.load(f)
 
-        self.samples_list = [
-            sample_path.stem for sample_path in images_path.glob("*.png")
-        ]
+        if self.split == "train":
+            self.samples_list = [
+                f"{sample_id:04}" for sample_id in split_dict["train"]
+            ]
+        elif self.split == "valid":
+            self.samples_list = [
+                f"{sample_id:04}" for sample_id in split_dict["val"]
+            ]
+        elif self.split == "test":
+            self.samples_list = []
+            test_images_dir = self.data_path / TN3KDataset.TEST_IMAGES_DIR
+            test_labels_dir = self.data_path / TN3KDataset.TEST_LABELS_DIR
+            for image_path in test_images_dir.glob("*.jpg"):
+                if not image_path.is_file():
+                    continue
+
+                label_path = test_images_dir / image_path.name
+                if not label_path.is_file():
+                    continue
+
+                self.samples_list.append(image_path.stem)
 
     def __len__(self):
         return len(self.samples_list)
@@ -116,35 +131,34 @@ class FUGCDataset(BaseDataset):
 
     def get_sample(self, index: int, normalize: bool = True) -> Any:
         case = self.samples_list[index]
-        
-        if self.split == "train":
-            split_dir = FUGCDataset.TRAIN_DIR
-        elif self.split == "valid":
-            split_dir = FUGCDataset.VALID_DIR
+
+        if self.split != "test":
+            image_path = (
+                self.data_path / f"{TN3KDataset.TRAINVAL_IMAGES_DIR}/{case}.jpg"
+            )
+            label_path = (
+                self.data_path / f"{TN3KDataset.TRAINVAL_LABELS_DIR}/{case}.jpg"
+            )
         else:
-            split_dir = FUGCDataset.TEST_DIR
+            image_path = (
+                self.data_path / f"{TN3KDataset.TEST_IMAGES_DIR}/{case}.jpg"
+            )
+            label_path = (
+                self.data_path / f"{TN3KDataset.TEST_LABELS_DIR}/{case}.jpg"
+            )
 
-        image_path = (
-            self.data_path
-            / split_dir
-            / FUGCDataset.IMAGES_DIR
-            / f"{case}.png"
-        )
-        label_path = (
-            self.data_path
-            / split_dir
-            / FUGCDataset.LABELS_DIR
-            / f"{case}.png"
-        )
-
-        image_pil = Image.open(image_path).convert("L")
+        image_pil = Image.open(image_path)
         label_pil = Image.open(label_path)
 
         image = F.to_tensor(image_pil)
         label = F.pil_to_tensor(label_pil)
+
+        cls_mask = label > 127
+        label[~cls_mask] = 0
+        label[cls_mask] = 1
         label = label.long()
 
-        image = image.repeat(self.image_channels // image.shape[0], 1, 1)
+        image = image.repeat(self.image_channels, 1, 1)
 
         data: dict = {"image": image, "label": label}
 

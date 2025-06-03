@@ -15,5 +15,5 @@ class ActiveSelector(ABC):
         select_num: int,
         model: nn.Module,
         device: torch.device,
-    ) -> Any:
+    ) -> list[Any]:
         pass
