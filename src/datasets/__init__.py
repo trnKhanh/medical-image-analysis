@@ -6,5 +6,5 @@ from .thyroid import TN3KDataset, TG3KDataset
 from .busi import BUSIDataset
 
 from .active_dataset import ActiveDataset
-from .common import ExtendableDataset
+from .common import ExtendableDataset, ImageDataset
 

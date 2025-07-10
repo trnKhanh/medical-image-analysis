@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mia"
 authors = [
-  {name = "Nam Khanh Tran", email = "21120015@student.hcmus.edu.vn"},
-  {name = "Le Dac Phu Phan", email = "21120111@student.hcmus.edu.vn"},
+    {name = "Nam Khanh Tran", email = "21120015@student.hcmus.edu.vn"},
+    {name = "Le Dac Phu Phan", email = "21120111@student.hcmus.edu.vn"},
 ]
 description = ""
 readme = "README.md"
@@ -15,22 +15,24 @@ keywords = []
 classifiers = []
 requires-python = ">=3.10"
 dependencies = [
-  "torch",
-  "torchvision",
-  "wandb",
-  "numpy<2",
-  "monai", 
-  "rich",
-  "pillow",
-  "tqdm",
-  "rich",
-  "opencv-python",
-  "nnunetv2",
-  "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
-  "SimpleITK",
-  "h5py",
-  "medpy",
-  "scikit-learn>=1.3"
+    "torch",
+    "torchvision",
+    "wandb",
+    "numpy<2",
+    "monai", 
+    "rich",
+    "pillow",
+    "tqdm",
+    "rich",
+    "opencv-python",
+    "nnunetv2",
+    "hiddenlayer @ git+https://github.com/FabianIsensee/hiddenlayer.git",
+    "SimpleITK",
+    "h5py",
+    "medpy",
+    "scikit-learn>=1.3",
+    "gradio",
+    "open_clip_torch"
 ]
 dynamic = ["version"]
 
@@ -49,6 +51,8 @@ fugc2025_rle2mask = "entry.fugc2025.preprocess.rle2mask:rle2mask_entry"
 cpcsam_train = "entry.cpcsam.train:train_entry"
 
 al_train = "entry.activelearning.train:train_entry"
+
+demo_serve = "entry.demo.serve:serve_entry"
 
 [tool.setuptools_scm]
 

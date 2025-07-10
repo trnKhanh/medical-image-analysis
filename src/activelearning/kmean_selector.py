@@ -25,6 +25,7 @@ class KMeanSelector(ActiveSelector):
         smooth: float = 1e-8,
         metric: Literal["cosine", "l1", "l2", "haversine"] = "cosine",
         feature_path: Path | str | None = None,
+        feature_dict: dict | None = None,
         coreset_criteria: Literal["mean", "min"] = "min",
         loaded_feature_weight: float = 1.0,
         loaded_feature_only: bool = False,
@@ -37,6 +38,7 @@ class KMeanSelector(ActiveSelector):
         self.smooth = smooth
         self.metric = metric
         self.feature_path = get_path(feature_path) if feature_path else None
+        self.feature_dict = feature_dict
         self.coreset_criteria = coreset_criteria
         self.loaded_feature_weight = loaded_feature_weight
         self.loaded_feature_only = loaded_feature_only
@@ -80,6 +82,10 @@ class KMeanSelector(ActiveSelector):
                         loaded_feat = loaded_feat_ds[:]
 
                     loaded_feat_list.append(loaded_feat)
+            elif self.feature_dict:
+                for idx in range(len(case_name)):
+                    case = case_name[idx]
+                    loaded_feat_list.append(self.feature_dict[case])
 
         total_feat_list = []
 
