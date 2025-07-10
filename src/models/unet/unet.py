@@ -52,9 +52,7 @@ class UNetEncoder(nn.Module):
 
         self.levels = nn.ModuleList()
         for l, num_channels in enumerate(self.channels_list):
-            in_channels = (
-                self.input_channels if l == 0 else self.channels_list[l - 1]
-            )
+            in_channels = self.input_channels if l == 0 else self.channels_list[l - 1]
             out_channels = num_channels
             first_stride = 1 if l == 0 else 2  # level 0 don't downsample
 
@@ -89,9 +87,7 @@ class UNetEncoder(nn.Module):
     def get_feature(self, x):
         B = x.shape[0]
         bottleneck_feat = self.forward(x, return_skips=False)  # [B, C, H, W]
-        feat = N.adaptive_avg_pool2d(bottleneck_feat, (1, 1)).view(
-            B, -1
-        )  # [B, C]
+        feat = N.adaptive_avg_pool2d(bottleneck_feat, (1, 1)).view(B, -1)  # [B, C]
         return feat
 
 
@@ -143,15 +139,11 @@ class UNetDecoder(nn.Module):
 
             # transpose conv
             if upconv:
-                upsample = transpose_conv_type(
-                    in_channels, out_channels, kernel_size=2, stride=2
-                )
+                upsample = transpose_conv_type(in_channels, out_channels, kernel_size=2, stride=2)
             else:
                 upsample = nn.Sequential(
                     [
-                        conv_type(
-                            in_channels, out_channels, kernel_size=1, stride=1
-                        ),
+                        conv_type(in_channels, out_channels, kernel_size=1, stride=1),
                         Upsample(
                             scale_factor=2,
                             mode=upsample_mode,
@@ -181,15 +173,11 @@ class UNetDecoder(nn.Module):
             self.levels.append(blocks)
 
         # seg output
-        self.seg_output = conv_type(
-            self.channels_list[-1], self.output_classes, kernel_size=1, stride=1
-        )
+        self.seg_output = conv_type(self.channels_list[-1], self.output_classes, kernel_size=1, stride=1)
 
         # mid-layer deep supervision
         if (self.deep_supervision) and (ds_layer > 1):
-            self.ds_layer_list = list(
-                range(num_upsample - ds_layer, num_upsample - 1)
-            )
+            self.ds_layer_list = list(range(num_upsample - ds_layer, num_upsample - 1))
             self.ds = nn.ModuleList()
             for l in range(num_upsample - 1):
                 if l in self.ds_layer_list:
@@ -222,16 +210,10 @@ class UNetDecoder(nn.Module):
         ds_outputs = []
         for l, feat in enumerate(skips):
             x = self.upsamples[l](x)  # upsample last-level feat
-            x = torch.cat(
-                [feat, x], dim=1
-            )  # concat upsampled feat and same-level skip feat
+            x = torch.cat([feat, x], dim=1)  # concat upsampled feat and same-level skip feat
             x = self.levels[l](x)  # concated feat to conv
 
-            if (
-                return_ds
-                and (self.deep_supervision)
-                and (l in self.ds_layer_list)
-            ):
+            if return_ds and (self.deep_supervision) and (l in self.ds_layer_list):
                 ds_outputs.append(self.ds[l](x))
 
         if return_ds:
@@ -247,16 +229,10 @@ class UNetDecoder(nn.Module):
         ds_outputs = []
         for l, feat in enumerate(skips):
             x = self.upsamples[l](x)  # upsample last-level feat
-            x = torch.cat(
-                [feat, x], dim=1
-            )  # concat upsampled feat and same-level skip feat
+            x = torch.cat([feat, x], dim=1)  # concat upsampled feat and same-level skip feat
             x = self.levels[l](x)  # concated feat to conv
 
-            if (
-                return_ds
-                and (self.deep_supervision)
-                and (l in self.ds_layer_list)
-            ):
+            if return_ds and (self.deep_supervision) and (l in self.ds_layer_list):
                 ds_feats.append(x)
                 ds_outputs.append(self.ds[l](x))
 
@@ -313,14 +289,10 @@ class UNet(nn.Module):
         )
 
     def forward(self, x, return_ds=False):
-        return self.decoder(
-            self.encoder(x, return_skips=True), return_ds=return_ds
-        )
+        return self.decoder(self.encoder(x, return_skips=True), return_ds=return_ds)
 
     def get_enc_feature(self, x):
         return self.encoder.get_feature(x)
 
     def get_pixel_feature(self, x, return_ds=False):
-        return self.decoder.get_feature(
-            self.encoder(x, return_skips=True), return_ds=return_ds
-        )
+        return self.decoder.get_feature(self.encoder(x, return_skips=True), return_ds=return_ds)

@@ -85,12 +85,22 @@ class KMeanSelector(ActiveSelector):
 
         if len(feat_list) and not self.loaded_feature_only:
             feats = np.concatenate(feat_list, axis=0)
+
+            mean = np.mean(feats, axis=1, keepdims=True)
+            std = np.std(feats, axis=1, keepdims=True)
+            feats = (feats - mean) / std
+
             total_feat_list.append(feats)
         else:
             feats = None
 
         if len(loaded_feat_list):
             loaded_feats = np.stack(loaded_feat_list, axis=0)
+
+            mean = np.mean(loaded_feats, axis=1, keepdims=True)
+            std = np.std(loaded_feats, axis=1, keepdims=True)
+            loaded_feats = (loaded_feats - mean) / std
+
             if feats is None:
                 scale_factor = 1
             else:
