@@ -20,6 +20,6 @@ al_train --dataset {fugc,busi} --data-path <path/to/data>
 
 ## Results in FUGC 2025
 Our team ranks 2nd on the public leaderboard (see [codabench](https://www.codabench.org/competitions/4781/#/results-tab)).
-<img src="./images/FUGC2025_leaderboard.png">
+![Public Leaderboard](./images/FUGC2025_leaderboard.png)
 On the final leaderboard, our team ranks 1st.
-<img src="./images/FUGC2025_final.png">
+![Final Leaderboard](./images/FUGC2025_final.png)
