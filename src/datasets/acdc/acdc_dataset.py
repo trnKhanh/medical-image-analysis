@@ -1,7 +1,7 @@
 import itertools
 from logging import Logger
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Union
 
 import h5py
 import numpy as np
@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms.functional as F
 from torch.utils.data.sampler import Sampler
 
+from transforms.joint_transform import JointResize
 from utils import get_path
 
 from ..basedataset import BaseDataset
@@ -63,6 +64,8 @@ class ACDCDataset(BaseDataset):
         normalize: Callable | None = None,
         transform: Callable | None = None,
         logger: Logger | None = None,
+        image_channels: int = 3,
+        image_size: Union[int, tuple[int, int], None] = None
     ):
         self.data_path = get_path(data_path)
         self.split = split
@@ -70,10 +73,19 @@ class ACDCDataset(BaseDataset):
         self.normalize = normalize
         self.transform = transform
         self.logger = logger
+        self.image_channels = image_channels
+        self.image_size = image_size
 
         self.samples_list = []
+        self.final_transform = self._get_final_transform()
 
         self._register_samples()
+
+    def _get_final_transform(self):
+        if self.image_size is None:
+            return None
+        else:
+            return JointResize(self.image_size)
 
     def _register_samples(self):
         if self.split == "train":

@@ -193,7 +193,6 @@ class CPCSAMTrainer(BaseTrainer):
             f"dice-{self.dice_weight}",
             f"coe1-{self.consistency_weight_1}",
             f"coe2-{self.consistency_weight_2}",
-            f"dice-{self.dice_weight}",
             f"epoch-{self.num_epochs}",
         ]
         if self.exp_name:
