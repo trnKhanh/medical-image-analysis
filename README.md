@@ -27,9 +27,21 @@ al_train --work-path <work-path> --dataset {fugc,busi} --data-path <path/to/data
 
 To run the demo:
 
+- By gradio:
 ```bash
 demo_serve
 ```
+
+- Start a web application
+by Docker
+```bash
+bash ./cmd/start_web.sh docker
+```
+or server
+```bash
+bash ./cmd/start_web.sh server
+```
+
 
 ## Results in FUGC 2025
 Our team ranks 2nd on the public leaderboard (see [codabench](https://www.codabench.org/competitions/4781/#/results-tab)).

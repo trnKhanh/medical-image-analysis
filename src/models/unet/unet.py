@@ -3,7 +3,6 @@ from typing import Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as N
-import torchvision.transforms.functional as F
 
 from .blocks import PlainBlock, ResidualBlock, Upsample
 
@@ -250,8 +249,8 @@ class UNet(nn.Module):
 
     dimension:        2D or 3D input
     input_channels:   #channels of input images, e.g. 4 for BraTS multimodal input
-    output_classes:   #classes of final ouput
-    channels_list:    #channels of every levels in a top-down order, e.g. [32, 64, 128, 256, 320, 320]
+    output_classes:   #classes of final output
+    channels_list:    #channels of every level in a top-down order, e.g. [32, 64, 128, 256, 320, 320]
     block_type:       Type of conv blocks, choice from 'plain' (PlainBlock) and 'res' (ResidualBlock)
     deep_supervision: Whether to use deep supervision in decoder
     ds_layer:         Last n layer for deep supervision, default set 0 for turning off

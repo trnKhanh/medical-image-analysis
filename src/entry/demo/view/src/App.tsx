@@ -1,0 +1,127 @@
+import React from 'react';
+import { Header } from './components/layout/Header';
+import { Notification } from './components/Notification';
+import { ConfigurationPanel } from './components/configuration/ConfigurationPanel';
+import { FileUploadPanel } from './components/upload/FileUploadPanel';
+import { ActiveSelectionPanel } from './components/selection/ActiveSelectionPanel';
+import { AnnotationEditor } from './components/annotation/AnnotationEditor';
+import { AnnotatedSamplesPanel } from './components/samples/AnnotatedSamplesPanel';
+import { useApp } from './hooks/useApp';
+import './styles/App.css';
+
+const App: React.FC = () => {
+    const {
+        // State
+        config,
+        status,
+        trainFiles,
+        poolFiles,
+        selectedSamples,
+        annotatedSamples,
+        selectedImageIndex,
+        pseudoLabel,
+        isAnnotating,
+        loading,
+        error,
+        success,
+        availableCheckpoints,
+        loadingCheckpoints,
+        brushColor,
+
+        // Actions
+        setTrainFiles,
+        setPoolFiles,
+        setBrushColor,
+        uploadFiles,
+        selectSamples,
+        submitAnnotation,
+        downloadDataset,
+        resetSystem,
+        startAnnotation,
+        loadAvailableCheckpoints
+    } = useApp();
+
+    return (
+        <div className="min-h-screen bg-gray-50">
+            {/* Header */}
+            <Header
+                status={status}
+                onReset={resetSystem}
+                isResetting={loading.reset}
+            />
+
+            {/* Notifications */}
+            {error && (
+                <Notification
+                    type="error"
+                    message={error}
+                />
+            )}
+
+            {success && (
+                <Notification
+                    type="success"
+                    message={success}
+                />
+            )}
+
+            {/* Main Content */}
+            <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+                <div className="grid grid-cols-1 lg:custom-grid-cols-2 gap-6">
+                    <div className="space-y-6">
+                        <FileUploadPanel
+                            trainFiles={trainFiles}
+                            poolFiles={poolFiles}
+                            loading={{ train: loading.train, pool: loading.pool }}
+                            onTrainFilesChange={setTrainFiles}
+                            onPoolFilesChange={setPoolFiles}
+                            onUploadTrain={() => trainFiles && uploadFiles(trainFiles, 'train')}
+                            onUploadPool={() => poolFiles && uploadFiles(poolFiles, 'pool')}
+                        />
+                    </div>
+                    <div className="space-y-6">
+                        <ConfigurationPanel
+                            config={config}
+                            checkpoints={availableCheckpoints}
+                            loadingCheckpoints={loadingCheckpoints}
+                            onRefreshCheckpoints={loadAvailableCheckpoints}
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6">
+                    <div className="space-y-6">
+                        <ActiveSelectionPanel
+                            selectedSamples={selectedSamples}
+                            status={status}
+                            isSelecting={loading.select}
+                            onSelectSamples={selectSamples}
+                            onStartAnnotation={startAnnotation}
+                        />
+
+                        {isAnnotating && pseudoLabel && selectedImageIndex !== null && (
+                            <AnnotationEditor
+                                pseudoLabel={pseudoLabel}
+                                selectedImagePath={selectedSamples[selectedImageIndex]}
+                                brushColor={brushColor}
+                                isSubmitting={loading.annotate}
+                                onBrushColorChange={setBrushColor}
+                                onSubmitAnnotation={submitAnnotation}
+                            />
+                        )}
+                    </div>
+
+                    <div className="space-y-6">
+                        <AnnotatedSamplesPanel
+                            samples={annotatedSamples}
+                            isDownloading={loading.download}
+                            onDownload={downloadDataset}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default App;

@@ -7,7 +7,6 @@ import h5py
 import numpy as np
 import torch
 from torch.utils.data.sampler import Sampler
-import torchvision.transforms.functional as F
 
 import pandas as pd
 
@@ -203,13 +202,8 @@ class TwoStreamBatchSampler(Sampler):
     as many times as needed.
     """
 
-    def __init__(
-        self,
-        primary_indices,
-        secondary_indices,
-        batch_size,
-        secondary_batch_size,
-    ):
+    def __init__(self, primary_indices, secondary_indices, batch_size, secondary_batch_size):
+        super().__init__()
         self.primary_indices = primary_indices
         self.secondary_indices = secondary_indices
         self.secondary_batch_size = secondary_batch_size

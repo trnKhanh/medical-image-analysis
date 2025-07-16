@@ -1,0 +1,14 @@
+[datasets.acdc]
+train="resources/ACDC_preprocessed/ACDC_training_slices"
+test="resources/ACDC_preprocessed/ACDC_testing_volumes"
+
+[train.active_learning]
+checkpoints = "resources/active_learning/checkpoints"
+
+[test.active_learning]
+output = "resources/active_learning/test_outputs"
+
+[webserver]
+
+[webserver.active_learning]
+
