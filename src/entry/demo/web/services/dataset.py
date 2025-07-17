@@ -1,6 +1,8 @@
 
 import base64
+import glob
 import io
+import os
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -311,6 +313,13 @@ class DatasetService:
             return images
         except Exception as e:
             return []
+
+    def clear_dataset(self) -> None:
+        files = glob.glob(os.path.join(self.pool_images_dir, "*"))
+        files.extend(glob.glob(os.path.join(self.train_images_dir, "*")))
+        for file in files:
+            if os.path.isfile(file):
+                os.remove(file)
 
     def clear_data(self):
         """Clear all in-memory data."""

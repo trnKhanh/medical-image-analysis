@@ -139,7 +139,7 @@ class ApiService {
     resetSystem(): Promise<void> {
         return this.request<void>({
             url: '/reset',
-            method: 'DELETE',
+            method: 'POST',
         });
     }
 }
