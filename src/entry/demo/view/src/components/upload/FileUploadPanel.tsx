@@ -1,7 +1,7 @@
-import React from 'react';
-import { Card, Upload, Button, Space, Typography, Divider, Row, Col } from 'antd';
+import {Card, Upload, Button, Space, Typography, Divider, Row, Col, ConfigProvider} from 'antd';
 import { UploadOutlined, InboxOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
+import React, { useState } from 'react';
 
 const { Title, Text } = Typography;
 
@@ -24,12 +24,17 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                                                                     onUploadTrain,
                                                                     onUploadPool
                                                                 }) => {
+    const [trainFileList, setTrainFileList] = useState<any[]>([]);
+    const [poolFileList, setPoolFileList] = useState<any[]>([]);
+
     const trainUploadProps: UploadProps = {
         name: 'trainFiles',
         multiple: true,
         accept: 'image/*',
-        beforeUpload: () => false, // Prevent auto upload
+        beforeUpload: () => false,
+        fileList: trainFileList,
         onChange: (info) => {
+            setTrainFileList(info.fileList);
             const files = info.fileList.map(file => file.originFileObj).filter(Boolean);
             const fileList = new DataTransfer();
             files.forEach(file => file && fileList.items.add(file));
@@ -46,8 +51,10 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
         name: 'poolFiles',
         multiple: true,
         accept: 'image/*',
-        beforeUpload: () => false, // Prevent auto upload
+        beforeUpload: () => false,
+        fileList: poolFileList,
         onChange: (info) => {
+            setPoolFileList(info.fileList);
             const files = info.fileList.map(file => file.originFileObj).filter(Boolean);
             const fileList = new DataTransfer();
             files.forEach(file => file && fileList.items.add(file));
@@ -58,6 +65,18 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
             showRemoveIcon: true,
         },
         listType: 'picture',
+    };
+
+    const handleUploadTrain = () => {
+        onUploadTrain();
+        setTrainFileList([]);
+        onTrainFilesChange(null);
+    };
+
+    const handleUploadPool = () => {
+        onUploadPool();
+        setPoolFileList([]);
+        onPoolFilesChange(null);
     };
 
     return (
@@ -79,9 +98,7 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
 
                 <Divider style={{ margin: 0 }} />
 
-                {/* Horizontal Layout for Training and Pool Images */}
                 <Row gutter={16}>
-                    {/* Training Images Section */}
                     <Col xs={24} md={12}>
                         <div>
                             <Text strong style={{ display: 'block', marginBottom: 12 }}>
@@ -100,14 +117,14 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                             </Upload.Dragger>
 
                             <Button className="!bg-blue-300 !border-blue-300 mt-3"
-                                type="primary"
-                                icon={<UploadOutlined />}
-                                loading={loading.train}
-                                disabled={!trainFiles || trainFiles.length === 0}
-                                onClick={onUploadTrain}
-                                block
-                                size="middle"
-                                style={{ marginTop: 12 }}
+                                    type="primary"
+                                    icon={<UploadOutlined />}
+                                    loading={loading.train}
+                                    disabled={!trainFiles || trainFiles.length === 0}
+                                    onClick={handleUploadTrain}
+                                    block
+                                    size="middle"
+                                    style={{ marginTop: 12 }}
                             >
                                 {loading.train ? 'Uploading...' : 'Upload Training'}
                             </Button>
@@ -132,18 +149,26 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                                 </p>
                             </Upload.Dragger>
 
-                            <Button
-                                className="!bg-green-300 !border-green-300 mt-3"
-                                type="default"
-                                icon={<UploadOutlined />}
-                                loading={loading.pool}
-                                disabled={!poolFiles || poolFiles.length === 0}
-                                onClick={onUploadPool}
-                                block
-                                size="middle"
+                            <ConfigProvider
+                                theme={{
+                                    token: {
+                                        colorPrimary: '#52c41a',
+                                    },
+                                }}
                             >
-                                {loading.pool ? 'Uploading...' : 'Upload Pool'}
-                            </Button>
+                                <Button
+                                    type="primary"
+                                    icon={<UploadOutlined />}
+                                    loading={loading.pool}
+                                    disabled={!poolFiles || poolFiles.length === 0}
+                                    onClick={handleUploadPool}
+                                    block
+                                    size="middle"
+                                    style={{ marginTop: 12 }}
+                                >
+                                    {loading.pool ? 'Uploading...' : 'Upload Pool'}
+                                </Button>
+                            </ConfigProvider>
                         </div>
                     </Col>
                 </Row>

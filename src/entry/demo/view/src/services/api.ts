@@ -87,25 +87,18 @@ class ApiService {
         });
     }
 
-    private buildFormData(files: FileList): FormData {
+    private buildFormData(files: FileList, type: string): FormData {
         const fd = new FormData();
         Array.from(files).forEach((f) => fd.append('files', f));
+        fd.append('type', type);
         return fd;
     }
 
-    uploadImages(files: FileList, type: str): Promise<{ message: string }> {
+    uploadImages(files: FileList, type: string): Promise<{ message: string }> {
         return this.request({
-            url: '/dataset/upload/train-images',
+            url: '/dataset/upload/images',
             method: 'POST',
-            data: this.buildFormData(files),
-        });
-    }
-
-    uploadPoolImages(files: FileList): Promise<{ message: string }> {
-        return this.request({
-            url: '/upload/pool-images',
-            method: 'POST',
-            data: this.buildFormData(files),
+            data: this.buildFormData(files, type),
         });
     }
 

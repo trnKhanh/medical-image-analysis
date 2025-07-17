@@ -25,8 +25,10 @@ class ImageInfo(BaseModel):
 
 
 class ImageUploadResponse(BaseResponse):
-    image_info: ImageInfo = Field(..., description="Uploaded image information")
-
+    success: bool = True
+    message: str
+    uploaded_images: Optional[List[ImageInfo]] = None
+    failed_uploads: Optional[List[Dict[str, str]]] = None
 
 class DatasetInfo(BaseModel):
     name: str = Field(..., description="Dataset name")

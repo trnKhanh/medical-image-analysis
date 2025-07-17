@@ -17,42 +17,14 @@ from entry.demo.web.services.dataset import dataset_service
 router = APIRouter()
 
 
-@router.post("/upload/train-images", response_model=ImageUploadResponse)
-async def upload_image(request: ImageUploadRequest):
-    """Upload a single image to the dataset."""
-    return await dataset_service.upload_image(request)
-
-
-@router.post("/images/upload-file", response_model=ImageUploadResponse)
-async def upload_image_file(
-        file: UploadFile = File(...),
-        case_name: str = Form(None)
+@router.post("/upload/images", response_model=ImageUploadResponse)
+async def upload_images(
+    files: List[UploadFile] = File(...),
+    type: str = Form(...)
 ):
-    """Upload a single image file to the dataset."""
-    try:
-        content = await file.read()
-
-        file_content_b64 = base64.b64encode(content).decode()
-
-        request = ImageUploadRequest(
-            filename=file.filename,
-            content=file_content_b64,
-            case_name=case_name
-        )
-
-        return await dataset_service.upload_image(request)
-    except Exception as e:
-        return ImageUploadResponse(
-            success=False,
-            message=f"Failed to upload file: {str(e)}"
-        )
-
-
-@router.post("/images/batch", response_model=List[ImageUploadResponse])
-async def upload_images_batch(requests: List[ImageUploadRequest]):
-    """Upload multiple images in batch."""
-    return await dataset_service.upload_images_batch(requests)
-
+    """Upload multiple images to the dataset."""
+    request = ImageUploadRequest(type=type, images=files)
+    return await dataset_service.upload_images(request)
 
 @router.get("/images", response_model=List[ImageInfo])
 async def get_image_list():

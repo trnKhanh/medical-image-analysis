@@ -54,77 +54,106 @@ class DatasetService:
 
         return False
 
-    async def upload_image(self, request: ImageUploadRequest) -> ImageUploadResponse:
-        """Upload a single image to the dataset."""
+    async def upload_images(self, request: ImageUploadRequest) -> ImageUploadResponse:
+        """Upload multiple images to the dataset."""
         try:
-            image_content = base64.b64decode(request.content)
+            upload_results = []
+            successful_uploads = []
+            failed_uploads = []
 
-            # Validate image
-            try:
-                image = Image.open(io.BytesIO(image_content))
-                image_size = image.size
-            except Exception as e:
+            for uploaded_file in request.images:
+                try:
+                    image_content = await uploaded_file.read()
+
+                    try:
+                        image = Image.open(io.BytesIO(image_content))
+                        image_size = image.size
+                    except Exception as e:
+                        failed_uploads.append({
+                            "filename": uploaded_file.filename,
+                            "error": f"Invalid image content: {str(e)}"
+                        })
+                        continue
+
+                    file_extension = Path(uploaded_file.filename).suffix.lower()
+                    if file_extension not in settings.ALLOWED_IMAGE_EXTENSIONS:
+                        failed_uploads.append({
+                            "filename": uploaded_file.filename,
+                            "error": f"Unsupported image format: {file_extension}"
+                        })
+                        continue
+
+                    # Check file size
+                    if len(image_content) > settings.MAX_UPLOAD_SIZE:
+                        failed_uploads.append({
+                            "filename": uploaded_file.filename,
+                            "error": "Image file too large"
+                        })
+                        continue
+
+                    case_name = Path(uploaded_file.filename).stem
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    unique_filename = f"{case_name}_{timestamp}{file_extension}"
+
+                    data_dir = self.train_images_dir
+                    if request.type == "pool":
+                        data_dir = self.pool_images_dir
+
+                    image_path = data_dir / unique_filename
+
+                    with open(image_path, 'wb') as f:
+                        f.write(image_content)
+
+                    image_info = ImageInfo(
+                        filename=uploaded_file.filename,
+                        path=str(image_path),
+                        size=image_size,
+                        case_name=case_name,
+                        created_at=datetime.now()
+                    )
+
+                    self.current_images.append(image_info)
+                    successful_uploads.append(image_info)
+
+                except Exception as e:
+                    failed_uploads.append({
+                        "filename": uploaded_file.filename,
+                        "error": f"Failed to process image: {str(e)}"
+                    })
+
+            total_files = len(request.images)
+            successful_count = len(successful_uploads)
+            failed_count = len(failed_uploads)
+
+            if successful_count == total_files:
+                return ImageUploadResponse(
+                    success=True,
+                    message=f"All {successful_count} images uploaded successfully",
+                    uploaded_images=successful_uploads
+                )
+            elif successful_count > 0:
+                return ImageUploadResponse(
+                    success=True,
+                    message=f"{successful_count} of {total_files} images uploaded successfully",
+                    uploaded_images=successful_uploads,
+                    failed_uploads=failed_uploads
+                )
+            else:
                 return ImageUploadResponse(
                     success=False,
-                    message=f"Invalid image content: {str(e)}"
+                    message="No images were uploaded successfully",
+                    failed_uploads=failed_uploads
                 )
-
-            file_extension = Path(request.filename).suffix.lower()
-            if file_extension not in settings.ALLOWED_IMAGE_EXTENSIONS:
-                return ImageUploadResponse(
-                    success=False,
-                    message=f"Unsupported image format: {file_extension}"
-                )
-
-            case_name = request.case_name or Path(request.filename).stem
-            image_path = self.images_dir / f"{case_name}{file_extension}"
-
-            # Check file size
-            if len(image_content) > settings.MAX_UPLOAD_SIZE:
-                return ImageUploadResponse(
-                    success=False,
-                    message="Image file too large"
-                )
-
-            # Save image file
-            with open(image_path, 'wb') as f:
-                f.write(image_content)
-
-            # Create image info and store in memory
-            image_info = ImageInfo(
-                filename=request.filename,
-                path=str(image_path),
-                size=image_size,
-                case_name=case_name,
-                created_at=datetime.now()
-            )
-
-            # Add to in-memory storage
-            self.current_images.append(image_info)
-
-            return ImageUploadResponse(
-                message="Image uploaded successfully",
-                image_info=image_info
-            )
 
         except Exception as e:
             return ImageUploadResponse(
                 success=False,
-                message=f"Failed to upload image: {str(e)}"
+                message=f"Failed to upload images: {str(e)}"
             )
-
-    async def upload_images_batch(self, requests: List[ImageUploadRequest]) -> List[ImageUploadResponse]:
-        """Upload multiple images in a batch."""
-        responses = []
-        for request in requests:
-            response = await self.upload_image(request)
-            responses.append(response)
-        return responses
 
     async def create_dataset(self, request: DatasetRequest, dataset_name: str) -> DatasetResponse:
         """Create a dataset with train and pool splits."""
         try:
-            # Validate image paths exist
             all_images = request.train_images + request.pool_images
             for image_path in all_images:
                 if not Path(image_path).exists():
@@ -133,7 +162,6 @@ class DatasetService:
                         message=f"Image not found: {image_path}"
                     )
 
-            # Create dataset info and store in memory
             dataset_info = DatasetInfo(
                 name=dataset_name,
                 train_count=len(request.train_images),
@@ -142,7 +170,6 @@ class DatasetService:
                 created_at=datetime.now()
             )
 
-            # Store in memory
             self.current_datasets[dataset_name] = dataset_info
 
             return DatasetResponse(
@@ -182,7 +209,6 @@ class DatasetService:
         """List all available datasets."""
         try:
             datasets = list(self.current_datasets.values())
-            # Sort by creation date (newest first)
             datasets.sort(key=lambda x: x.created_at, reverse=True)
             return datasets
         except Exception as e:
@@ -191,10 +217,8 @@ class DatasetService:
     async def save_annotation(self, request: AnnotationRequest) -> AnnotationResponse:
         """Save an annotation for an image."""
         try:
-            # Decode mask data
             mask_content = base64.b64decode(request.mask_data)
 
-            # Create paths
             case_name = request.case_name or Path(request.image_path).stem
             mask_path = self.annotations_dir / f"{case_name}_mask.png"
 
@@ -202,7 +226,6 @@ class DatasetService:
             with open(mask_path, 'wb') as f:
                 f.write(mask_content)
 
-            # Create annotation info and store in memory
             annotation_info = AnnotationInfo(
                 image_path=request.image_path,
                 mask_path=str(mask_path),
@@ -210,7 +233,6 @@ class DatasetService:
                 annotated_at=datetime.now()
             )
 
-            # Add to in-memory storage
             self.current_annotations.append(annotation_info)
 
             return AnnotationResponse(
@@ -227,7 +249,6 @@ class DatasetService:
     async def export_dataset(self, request: DatasetExportRequest) -> DatasetExportResponse:
         """Export dataset with annotations to a downloadable format."""
         try:
-            # Create export file path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             export_filename = f"{request.dataset_name}_{timestamp}.{request.format}"
             export_path = self.exports_dir / export_filename
@@ -285,9 +306,7 @@ class DatasetService:
     async def get_image_list(self) -> List[ImageInfo]:
         """Get a list of all uploaded images."""
         try:
-            # Return from in-memory storage
             images = self.current_images.copy()
-            # Sort by upload date (newest first)
             images.sort(key=lambda x: x.created_at, reverse=True)
             return images
         except Exception as e:

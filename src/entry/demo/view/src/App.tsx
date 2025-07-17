@@ -75,8 +75,16 @@ const App: React.FC = () => {
                             loading={{ train: loading.train, pool: loading.pool }}
                             onTrainFilesChange={setTrainFiles}
                             onPoolFilesChange={setPoolFiles}
-                            onUploadTrain={() => trainFiles && uploadFiles(trainFiles, 'train')}
-                            onUploadPool={() => poolFiles && uploadFiles(poolFiles, 'pool')}
+                            onUploadTrain={async () => {
+                                if (trainFiles)
+                                    await uploadFiles(trainFiles, 'train');
+                                setTrainFiles(null);
+                            }}
+                            onUploadPool={async () => {
+                                if (poolFiles)
+                                    await uploadFiles(poolFiles, 'pool');
+                                setPoolFiles(null)
+                            }}
                         />
                     </div>
                     <div className="space-y-6">

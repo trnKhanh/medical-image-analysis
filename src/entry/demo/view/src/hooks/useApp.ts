@@ -99,9 +99,7 @@ export const useApp = () => {
         try {
             setLoading(prev => ({ ...prev, [type]: true }));
 
-            const result = type === 'train'
-                ? await apiService.uploadTrainImages(files)
-                : await apiService.uploadPoolImages(files);
+            const result = await apiService.uploadImages(files, type)
 
             showSuccess(result.message);
             await loadStatus();
@@ -163,7 +161,7 @@ export const useApp = () => {
             await loadAnnotatedSamples();
             await loadStatus();
 
-            // Move to next image or close annotation
+            // Move to the next image or close annotation
             if (selectedImageIndex < selectedSamples.length - 1) {
                 setSelectedImageIndex(selectedImageIndex + 1);
                 await loadPseudoLabel(selectedSamples[selectedImageIndex + 1]);
