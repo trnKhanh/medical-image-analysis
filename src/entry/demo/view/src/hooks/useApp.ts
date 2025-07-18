@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import type {
     Config,
-    SystemStatus,
     AnnotatedSample,
     PseudoLabel,
     ModelCheckpoint,
     LoadingState,
-    AnnotationData
+    AnnotationData,
+    ActiveLearningState, SelectedSample
 } from '../models';
 import { apiService } from '../services/api';
 import { createImageFromBackground, downloadFile } from '../commons/utils.ts';
@@ -23,18 +23,16 @@ export const useApp = () => {
         loaded_feature_only: false
     });
 
-    const [status, setStatus] = useState<SystemStatus>({
-        train_set_size: 0,
-        pool_set_size: 0,
-        selected_set_size: 0,
-        annotated_set_size: 0,
-        current_dataset: 'dataset',
-        feature_dict_loaded: false
+    const [status, setStatus] = useState<ActiveLearningState>({
+        train_count: 0,
+        annotated_count: 0,
+        pool_count: 0,
+        selected_count: 0
     });
 
     const [trainFiles, setTrainFiles] = useState<FileList | null>(null);
     const [poolFiles, setPoolFiles] = useState<FileList | null>(null);
-    const [selectedSamples, setSelectedSamples] = useState<string[]>([]);
+    const [selectedSamples, setSelectedSamples] = useState<SelectedSample[]>([]);
     const [annotatedSamples, setAnnotatedSamples] = useState<AnnotatedSample[]>([]);
     const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
     const [pseudoLabel, setPseudoLabel] = useState<PseudoLabel | null>(null);
@@ -65,6 +63,7 @@ export const useApp = () => {
             setStatus(data);
         } catch (err) {
             showError('Failed to load status');
+            console.error(err);
         }
     }, [showError]);
 
@@ -74,6 +73,7 @@ export const useApp = () => {
             setConfig(data);
         } catch (err) {
             showError('Failed to load configuration');
+            console.error(err);
         }
     }, [showError]);
 
@@ -105,6 +105,7 @@ export const useApp = () => {
             await loadStatus();
         } catch (err) {
             showError(`Failed to upload ${type} files`);
+            console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, [type]: false }));
         }
@@ -116,19 +117,21 @@ export const useApp = () => {
             await apiService.updateConfig(config);
             const result = await apiService.selectSamples();
             setSelectedSamples(result.selected_images);
+            console.log(result.selected_images);
             showSuccess('Sample selection completed');
             await loadStatus();
         } catch (err) {
             showError('Failed to select samples');
+            console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, select: false }));
         }
     }, [updateConfig, config, showError, showSuccess, loadStatus]);
 
-    const loadPseudoLabel = useCallback(async (imagePath: string) => {
+    const loadPseudoLabel = useCallback(async (imageIndex: number) => {
         try {
             setLoading(prev => ({ ...prev, pseudo: true }));
-            const result = await apiService.getPseudoLabel(imagePath);
+            const result = await apiService.getPseudoLabel(imageIndex);
             setPseudoLabel(result);
 
             // Initialize mask data with zeros
@@ -137,6 +140,7 @@ export const useApp = () => {
             setMaskData(Array(height).fill(null).map(() => Array(width).fill(0)));
         } catch (err) {
             showError('Failed to load pseudo label');
+            console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, pseudo: false }));
         }
@@ -151,7 +155,7 @@ export const useApp = () => {
             const backgroundBase64 = createImageFromBackground(pseudoLabel.background);
 
             const annotation: AnnotationData = {
-                image_path: selectedSamples[selectedImageIndex],
+                image_path: selectedSamples[selectedImageIndex].path,
                 mask_data: maskData,
                 background_image: backgroundBase64
             };
@@ -161,10 +165,9 @@ export const useApp = () => {
             await loadAnnotatedSamples();
             await loadStatus();
 
-            // Move to the next image or close annotation
             if (selectedImageIndex < selectedSamples.length - 1) {
                 setSelectedImageIndex(selectedImageIndex + 1);
-                await loadPseudoLabel(selectedSamples[selectedImageIndex + 1]);
+                await loadPseudoLabel(selectedImageIndex + 1);
             } else {
                 setIsAnnotating(false);
                 setSelectedImageIndex(null);
@@ -172,6 +175,7 @@ export const useApp = () => {
             }
         } catch (err) {
             showError('Failed to submit annotation');
+            console.error(err)
         } finally {
             setLoading(prev => ({ ...prev, annotate: false }));
         }
@@ -182,7 +186,8 @@ export const useApp = () => {
             const result = await apiService.getAnnotatedSamples();
             setAnnotatedSamples(result.annotated_samples);
         } catch (err) {
-            showError('Failed to load annotated samples');
+            showError(`Failed to load annotated samples`);
+            console.error(err);
         }
     }, [showError]);
 
@@ -194,6 +199,7 @@ export const useApp = () => {
             showSuccess('Dataset downloaded successfully');
         } catch (err) {
             showError('Failed to download dataset');
+            console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, download: false }));
         }
@@ -217,16 +223,27 @@ export const useApp = () => {
             loadStatus();
         } catch (err) {
             showError('Failed to reset system');
+            console.error(err)
         } finally {
             setLoading((prev: any) => ({ ...prev, reset: false }));
         }
     }, [showError, showSuccess, loadStatus]);
 
+    const syncSystem = useCallback(async () => {
+        console.log('syncSystem');
+    }, []);
+
     const startAnnotation = useCallback((index: number) => {
         setSelectedImageIndex(index);
         setIsAnnotating(true);
-        loadPseudoLabel(selectedSamples[index]);
+        loadPseudoLabel(index);
     }, [selectedSamples, loadPseudoLabel]);
+
+    const cancelAnnotation = () => {
+        setIsAnnotating(false);
+        setSelectedImageIndex(null);
+        setPseudoLabel(null);
+    };
 
     // Initialize data on mount
     useEffect(() => {
@@ -265,7 +282,9 @@ export const useApp = () => {
         submitAnnotation,
         downloadDataset,
         resetSystem,
+        syncSystem,
         startAnnotation,
+        cancelAnnotation,
         loadAvailableCheckpoints,
         showError,
         showSuccess

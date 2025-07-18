@@ -1,3 +1,5 @@
+import os
+import zipfile
 from datetime import datetime
 from pathlib import Path
 import numpy as np
@@ -41,3 +43,37 @@ def draw_mask(image, mask, opacity=0.2):
         visualized_image[class_mask] = opacity * class_colors[class_id] + (1 - opacity) * visualized_image[class_mask]
         
     return visualized_image
+
+
+def zip_folder(folder_path: str | Path, zip_filename: str = None) -> Path:
+    """
+    Simple function to zip a folder and return the zip file path.
+
+    Args:
+        folder_path: Path to the folder to zip
+        zip_filename: Optional custom name for a zip file (without .zip extension)
+
+    Returns:
+        Path to the created zip file
+    """
+    folder_path = Path(folder_path)
+
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder {folder_path} does not exist")
+
+    if not folder_path.is_dir():
+        raise ValueError(f"{folder_path} is not a directory")
+
+    if zip_filename is None:
+        zip_filename = folder_path.name
+
+    zip_path = folder_path.parent / f"{zip_filename}.zip"
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_path = Path(root) / file
+                arcname = file_path.relative_to(folder_path)
+                zipf.write(file_path, arcname)
+
+    return zip_path

@@ -8,13 +8,11 @@ export interface Config {
     loaded_feature_only: boolean;
 }
 
-export interface SystemStatus {
-    train_set_size: number;
-    pool_set_size: number;
-    selected_set_size: number;
-    annotated_set_size: number;
-    current_dataset: string;
-    feature_dict_loaded: boolean;
+export interface ActiveLearningState {
+    train_count: number;
+    pool_count: number;
+    annotated_count: number;
+    selected_count: number;
 }
 
 export interface AnnotatedSample {
@@ -25,7 +23,7 @@ export interface AnnotatedSample {
 export interface PseudoLabel {
     background: number[][][];
     layers: number[][][][];
-    image_path: string;
+    image_content: string;
 }
 
 export interface AnnotationData {
@@ -56,6 +54,11 @@ export interface ApiResponse<T = any> {
 }
 
 export interface SelectionResponse {
-    selected_images: string[];
-    dataset_id: string;
+    selected_images: SelectedSample[];
+}
+
+export interface SelectedSample {
+    path: string;
+    name: string;
+    data: string;
 }

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Model settings
     DEFAULT_FOUNDATION_MODEL: str = "BiomedCLIP"
-    DEFAULT_SPECIALIST_MODEL: str = "./data/models/init_model.pth"
+    DEFAULT_SPECIALIST_MODEL: str = "./resources/models/init_model.pth"
     IMAGE_SIZE: int = 256
     IMAGES_PER_ROW: int = 10
 
@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     ROOT_DIR: Path = Path("./resources")
     DATA_DIR: Path = ROOT_DIR / "data"
     MODELS_DIR: Path = ROOT_DIR / "models"
-    DATASETS_DIR: Path = DATA_DIR / "datasets"
+    DATASETS_DIR: Path = ROOT_DIR / "datasets"
 
     # Device settings
     DEVICE: str = "cpu"

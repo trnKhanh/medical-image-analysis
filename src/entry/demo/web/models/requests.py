@@ -13,7 +13,7 @@ class ActiveLearningConfigRequest(BaseModel):
     loaded_feature_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for loaded features")
     sharp_factor: float = Field(default=1.0, ge=0.0, le=10.0, description="Sharpening factor")
     loaded_feature_only: bool = Field(default=False, description="Use only loaded features")
-    model_ckpt: str = Field(default="./data/models/init_model.pth", description="Specialist model checkpoint path")
+    model_ckpt: str = Field(default="init_model.pth", description="Specialist model checkpoint path")
 
     @validator('device')
     def validate_device(cls, v):
@@ -50,11 +50,3 @@ class PredictionRequest(BaseModel):
 
 class DatasetExportRequest(BaseModel):
     dataset_name: str = Field(..., description="Name for the exported dataset")
-    include_annotations: bool = Field(default=True, description="Include annotation masks")
-    format: str = Field(default="zip", description="Export format (zip, tar)")
-
-    @validator('format')
-    def validate_format(cls, v):
-        if v not in ['zip', 'tar']:
-            raise ValueError('Format must be either "zip" or "tar"')
-        return v

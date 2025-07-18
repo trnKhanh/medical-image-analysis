@@ -21,32 +21,6 @@ async def upload_model_checkpoint(request: ModelCheckpointRequest):
     return await model_service.upload_model_checkpoint(request)
 
 
-@router.post("/checkpoints/upload-file", response_model=ModelCheckpointResponse)
-async def upload_model_checkpoint_file(
-        file: UploadFile = File(...),
-        name: str = Form(...),
-        description: str = Form("")
-):
-    """Upload a new model checkpoint from file."""
-    try:
-        content = await file.read()
-
-        file_content_b64 = base64.b64encode(content).decode()
-
-        request = ModelCheckpointRequest(
-            name=name,
-            description=description,
-            file_content=file_content_b64
-        )
-
-        return await model_service.upload_model_checkpoint(request)
-    except Exception as e:
-        return ModelCheckpointResponse(
-            success=False,
-            message=f"Failed to upload file: {str(e)}"
-        )
-
-
 @router.delete("/checkpoints/{model_name}", response_model=ModelCheckpointResponse)
 async def delete_model_checkpoint(model_name: str):
     """Delete a model checkpoint."""

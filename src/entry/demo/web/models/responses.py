@@ -86,9 +86,9 @@ class AnnotationResponse(BaseResponse):
 
 class DatasetExportResponse(BaseResponse):
     export_path: str = Field(..., description="Path to exported dataset")
-    export_format: str = Field(..., description="Export format used")
     file_size: int = Field(..., description="Export file size in bytes")
-    included_items: Dict[str, int] = Field(..., description="Count of included items")
+    sample_count: int = Field(..., description="Number of samples exported")
+    export_format: str = Field(..., description="Export format")
 
 
 class FoundationModelInfo(BaseModel):
@@ -113,3 +113,8 @@ class HealthResponse(BaseResponse):
     specialist_model_loaded: bool = Field(..., description="Specialist model status")
     uptime: str = Field(..., description="Server uptime")
     version: str = Field(..., description="API version")
+
+class ActiveLearningStateResponse(BaseResponse):
+    train_count: int = Field(..., description="Number of training images")
+    pool_count: int = Field(..., description="Number of pool images")
+    annotated_count: int = Field(..., description="Number of annotated images")

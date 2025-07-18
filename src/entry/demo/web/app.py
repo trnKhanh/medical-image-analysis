@@ -792,6 +792,7 @@ from fastapi.staticfiles import StaticFiles
 
 from entry.demo.web.api.routes import api_router
 from entry.demo.web.config import settings
+from entry.demo.web.services.active_learning import active_learning_service
 
 
 @asynccontextmanager
@@ -800,7 +801,7 @@ async def lifespan(app: FastAPI):
     # Startup
     print("Starting up FastAPI application...")
     print("Working in simplified mode (no heavy model dependencies)")
-
+    await active_learning_service.specialist_model.initialize()
     yield
 
     # Shutdown

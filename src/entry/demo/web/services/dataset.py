@@ -1,49 +1,35 @@
-
-import base64
-import glob
 import io
-import os
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 from PIL import Image
+from starlette.responses import StreamingResponse
 
+from datasets import ActiveDataset
 from entry.demo.web.config import settings
-from entry.demo.web.models.requests import (AnnotationRequest,
-                                            DatasetExportRequest,
-                                            DatasetRequest, ImageUploadRequest)
-from entry.demo.web.models.responses import (AnnotationInfo,
-                                             AnnotationResponse,
-                                             DatasetExportResponse,
-                                             DatasetInfo, DatasetResponse,
+from entry.demo.web.models.requests import (ImageUploadRequest)
+from entry.demo.web.models.responses import (DatasetExportResponse,
                                              ImageInfo, ImageUploadResponse)
+from entry.demo.web.services.active_learning import active_learning_service
 
 
 class DatasetService:
     def __init__(self):
-        self.datasets_dir = settings.DATASETS_DIR
-        self.annotations_dir = self.datasets_dir / "annotations"
-        self.train_images_dir = self.datasets_dir / "train"
-        self.pool_images_dir = self.datasets_dir / "pool"
-        self.exports_dir = self.datasets_dir / "exports"
-
-        # In-memory storage
-        self.current_images: List[ImageInfo] = []
-        self.current_datasets: Dict[str, DatasetInfo] = {}
-        self.current_annotations: List[AnnotationInfo] = []
+        self.data_dir = settings.DATA_DIR
+        self.annotations_dir = self.data_dir / "annotations"
+        self.train_images_dir = self.data_dir / "train"
+        self.pool_images_dir = self.data_dir / "pool"
 
         self._ensure_directories()
 
     def _ensure_directories(self):
         """Ensure all necessary directories exist."""
-        self.datasets_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
         self.annotations_dir.mkdir(parents=True, exist_ok=True)
         self.train_images_dir.mkdir(parents=True, exist_ok=True)
         self.pool_images_dir.mkdir(parents=True, exist_ok=True)
-        self.exports_dir.mkdir(parents=True, exist_ok=True)
 
     def validate_image_file(file: UploadFile) -> bool:
         """Validate if the uploaded file is an image"""
@@ -59,7 +45,6 @@ class DatasetService:
     async def upload_images(self, request: ImageUploadRequest) -> ImageUploadResponse:
         """Upload multiple images to the dataset."""
         try:
-            upload_results = []
             successful_uploads = []
             failed_uploads = []
 
@@ -85,7 +70,6 @@ class DatasetService:
                         })
                         continue
 
-                    # Check file size
                     if len(image_content) > settings.MAX_UPLOAD_SIZE:
                         failed_uploads.append({
                             "filename": uploaded_file.filename,
@@ -106,6 +90,11 @@ class DatasetService:
                     with open(image_path, 'wb') as f:
                         f.write(image_content)
 
+                    if request.type == "pool":
+                        active_learning_service.current_pool_set.append(str(image_path))
+                    else:
+                        active_learning_service.current_train_set.append(str(image_path))
+
                     image_info = ImageInfo(
                         filename=uploaded_file.filename,
                         path=str(image_path),
@@ -114,7 +103,6 @@ class DatasetService:
                         created_at=datetime.now()
                     )
 
-                    self.current_images.append(image_info)
                     successful_uploads.append(image_info)
 
                 except Exception as e:
@@ -153,179 +141,83 @@ class DatasetService:
                 message=f"Failed to upload images: {str(e)}"
             )
 
-    async def create_dataset(self, request: DatasetRequest, dataset_name: str) -> DatasetResponse:
-        """Create a dataset with train and pool splits."""
-        try:
-            all_images = request.train_images + request.pool_images
-            for image_path in all_images:
-                if not Path(image_path).exists():
-                    return DatasetResponse(
-                        success=False,
-                        message=f"Image not found: {image_path}"
-                    )
-
-            dataset_info = DatasetInfo(
-                name=dataset_name,
-                train_count=len(request.train_images),
-                pool_count=len(request.pool_images),
-                total_count=len(all_images),
-                created_at=datetime.now()
-            )
-
-            self.current_datasets[dataset_name] = dataset_info
-
-            return DatasetResponse(
-                message="Dataset created successfully",
-                dataset_info=dataset_info
-            )
-
-        except Exception as e:
-            return DatasetResponse(
-                success=False,
-                message=f"Failed to create dataset: {str(e)}"
-            )
-
-    async def get_dataset_info(self, dataset_name: str) -> DatasetResponse:
-        """Get information about a specific dataset."""
-        try:
-            if dataset_name not in self.current_datasets:
-                return DatasetResponse(
-                    success=False,
-                    message=f"Dataset '{dataset_name}' not found"
-                )
-
-            dataset_info = self.current_datasets[dataset_name]
-
-            return DatasetResponse(
-                message="Dataset information retrieved successfully",
-                dataset_info=dataset_info
-            )
-
-        except Exception as e:
-            return DatasetResponse(
-                success=False,
-                message=f"Failed to get dataset info: {str(e)}"
-            )
-
-    async def list_datasets(self) -> List[DatasetInfo]:
-        """List all available datasets."""
-        try:
-            datasets = list(self.current_datasets.values())
-            datasets.sort(key=lambda x: x.created_at, reverse=True)
-            return datasets
-        except Exception as e:
-            return []
-
-    async def save_annotation(self, request: AnnotationRequest) -> AnnotationResponse:
-        """Save an annotation for an image."""
-        try:
-            mask_content = base64.b64decode(request.mask_data)
-
-            case_name = request.case_name or Path(request.image_path).stem
-            mask_path = self.annotations_dir / f"{case_name}_mask.png"
-
-            # Save mask as binary file
-            with open(mask_path, 'wb') as f:
-                f.write(mask_content)
-
-            annotation_info = AnnotationInfo(
-                image_path=request.image_path,
-                mask_path=str(mask_path),
-                case_name=case_name,
-                annotated_at=datetime.now()
-            )
-
-            self.current_annotations.append(annotation_info)
-
-            return AnnotationResponse(
-                message="Annotation saved successfully",
-                annotation_info=annotation_info
-            )
-
-        except Exception as e:
-            return AnnotationResponse(
-                success=False,
-                message=f"Failed to save annotation: {str(e)}"
-            )
-
-    async def export_dataset(self, request: DatasetExportRequest) -> DatasetExportResponse:
+    async def export_dataset(self, use_memory: bool = False) -> DatasetExportResponse:
         """Export dataset with annotations to a downloadable format."""
+        annotated_count = active_learning_service.get_state().annotated_count
+        if not annotated_count:
+            raise HTTPException(status_code=404, detail="No annotated samples available")
+        annotated_set = active_learning_service.get_annotated_set()
+
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            export_filename = f"{request.dataset_name}_{timestamp}.{request.format}"
-            export_path = self.exports_dir / export_filename
+            self.annotations_dir.mkdir(exist_ok=True, parents=True)
+            images_dir = self.annotations_dir / "images"
+            labels_dir = self.annotations_dir / "labels"
+            images_dir.mkdir(exist_ok=True, parents=True)
+            labels_dir.mkdir(exist_ok=True, parents=True)
 
-            included_items = {"images": 0, "annotations": 0}
+            zip_file = self.annotations_dir / f"dataset_{annotated_count}_samples.zip"
 
-            if request.format == "zip":
-                with zipfile.ZipFile(export_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                    # Add dataset structure
-                    zip_file.writestr(f"{request.dataset_name}/", "")
-                    zip_file.writestr(f"{request.dataset_name}/images/", "")
-                    if request.include_annotations:
-                        zip_file.writestr(f"{request.dataset_name}/labels/", "")
+            with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as archive:
+                for sample in annotated_set:
+                    case_name = Path(sample["path"]).stem
+                    image_np = sample["image"]
+                    label_np = sample["mask"]
 
-                    # Add images and annotations from in-memory storage
-                    for annotation in self.current_annotations:
-                        image_path = Path(annotation.image_path)
-                        if image_path.exists():
-                            zip_file.write(
-                                image_path,
-                                f"{request.dataset_name}/images/{image_path.name}"
-                            )
-                            included_items["images"] += 1
+                    image_pil = Image.fromarray(image_np)
+                    label_pil = Image.fromarray(label_np)
 
-                        if request.include_annotations:
-                            mask_path = Path(annotation.mask_path)
-                            if mask_path.exists():
-                                zip_file.write(
-                                    mask_path,
-                                    f"{request.dataset_name}/labels/{mask_path.name}"
-                                )
-                                included_items["annotations"] += 1
+                    image_path = images_dir / f"{case_name}.png"
+                    label_path = labels_dir / f"{case_name}.png"
 
-            # Get file size
-            file_size = export_path.stat().st_size if export_path.exists() else 0
+                    image_pil.save(image_path)
+                    label_pil.save(label_path)
+
+                    archive.write(image_path, arcname=f"images/{case_name}.png")
+                    archive.write(label_path, arcname=f"labels/{case_name}.png")
+
+            file_size = zip_file.stat().st_size if zip_file.exists() else None
 
             return DatasetExportResponse(
-                message="Dataset exported successfully",
-                export_path=str(export_path),
-                export_format=request.format,
+                export_path=zip_file,
                 file_size=file_size,
-                included_items=included_items
+                sample_count=annotated_count,
+                export_format="zip"
             )
 
         except Exception as e:
-            return DatasetExportResponse(
-                success=False,
-                message=f"Failed to export dataset: {str(e)}",
-                export_path="",
-                export_format="",
-                file_size=0,
-                included_items={}
-            )
+            raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
-    async def get_image_list(self) -> List[ImageInfo]:
-        """Get a list of all uploaded images."""
+    async def create_streaming_response(self, export_response: DatasetExportResponse) -> StreamingResponse:
+        """Create a streaming response for large files."""
+        if not export_response.export_path.exists():
+            raise HTTPException(status_code=404, detail="Export file not found")
+
+        def file_generator():
+            with open(export_response.export_path, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+
+        return StreamingResponse(
+            file_generator(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename=annotated_dataset_{export_response.sample_count}_samples.zip"
+            }
+        )
+
+    def clear(self):
+        """Clear all images from the dataset."""
         try:
-            images = self.current_images.copy()
-            images.sort(key=lambda x: x.created_at, reverse=True)
-            return images
+            for image_path in self.train_images_dir.glob("*"):
+                image_path.unlink()
+            for image_path in self.pool_images_dir.glob("*"):
+                image_path.unlink()
+            for image_path in self.annotations_dir.glob("*"):
+                image_path.unlink()
         except Exception as e:
-            return []
-
-    def clear_dataset(self) -> None:
-        files = glob.glob(os.path.join(self.pool_images_dir, "*"))
-        files.extend(glob.glob(os.path.join(self.train_images_dir, "*")))
-        for file in files:
-            if os.path.isfile(file):
-                os.remove(file)
-
-    def clear_data(self):
-        """Clear all in-memory data."""
-        self.current_images.clear()
-        self.current_datasets.clear()
-        self.current_annotations.clear()
+            raise HTTPException(status_code=500, detail=f"Failed to clear dataset: {str(e)}")
+        else:
+            return {"message": "Dataset cleared successfully"}
 
 
 # Global service instance

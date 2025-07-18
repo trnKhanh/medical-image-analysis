@@ -38,7 +38,7 @@ class Config:
         self.loaded_feature_weight = 1
         self.sharp_factor = 1
         self.loaded_feature_only = False
-        self.model_ckpt = "./init_model.pth"
+        self.model_ckpt = "resources/models/init_model.pth"
 
 
 config = Config()
@@ -52,7 +52,7 @@ def build_foundation_model(device):
         tokenizer = get_tokenizer("hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224")
         model.to(device)
         model.eval()
-        return model, preprocess
+        return model, preprocess, tokenizer
     else:
         raise RuntimeError()
 
@@ -81,7 +81,7 @@ def get_feature_dict(batch_size, device, active_dataset: ActiveDataset):
     dataset = ConcatDataset([active_dataset.get_train_dataset(), active_dataset.get_pool_dataset()])
     dataloader = DataLoader(dataset, batch_size=batch_size)
 
-    model, preprocess = build_foundation_model(device)
+    model, preprocess, _ = build_foundation_model(device)
     feature_dict = {}
 
     for sampled_batch in dataloader:

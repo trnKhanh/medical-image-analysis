@@ -1,476 +1,248 @@
-// import type {PseudoLabel} from "../../models";
-// import React from "react";
-// import {CheckCircle} from "lucide-react";
-//
-//
-// export const AnnotationEditor: React.FC<{
-//     pseudoLabel: PseudoLabel;
-//     selectedImagePath: string;
-//     brushColor: string;
-//     isSubmitting: boolean;
-//     onBrushColorChange: (color: string) => void;
-//     onSubmitAnnotation: () => void;
-// }> = ({ pseudoLabel, selectedImagePath, brushColor, isSubmitting, onBrushColorChange, onSubmitAnnotation }) => {
-//
-//     // Convert pseudoLabel background to displayable image
-//     const backgroundImageSrc = React.useMemo(() => {
-//         if (!pseudoLabel?.background) return null;
-//
-//         const canvas = document.createElement('canvas');
-//         const ctx = canvas.getContext('2d');
-//         if (!ctx) return null;
-//
-//         const height = pseudoLabel.background.length;
-//         const width = pseudoLabel.background[0].length;
-//
-//         canvas.width = width;
-//         canvas.height = height;
-//
-//         const imageData = ctx.createImageData(width, height);
-//
-//         for (let y = 0; y < height; y++) {
-//             for (let x = 0; x < width; x++) {
-//                 const pixelIndex = (y * width + x) * 4;
-//                 const pixel = pseudoLabel.background[y][x];
-//
-//                 // Handle different pixel formats
-//                 if (Array.isArray(pixel)) {
-//                     imageData.data[pixelIndex] = pixel[0] || 0;     // R
-//                     imageData.data[pixelIndex + 1] = pixel[1] || 0; // G
-//                     imageData.data[pixelIndex + 2] = pixel[2] || 0; // B
-//                     imageData.data[pixelIndex + 3] = pixel[3] !== undefined ? pixel[3] : 255; // A
-//                 } else {
-//                     // Grayscale
-//                     imageData.data[pixelIndex] = pixel;
-//                     imageData.data[pixelIndex + 1] = pixel;
-//                     imageData.data[pixelIndex + 2] = pixel;
-//                     imageData.data[pixelIndex + 3] = 255;
-//                 }
-//             }
-//         }
-//
-//         ctx.putImageData(imageData, 0, 0);
-//         return canvas.toDataURL();
-//     }, [pseudoLabel]);
-//
-//     // Convert layers to overlay images
-//     const layerOverlays = React.useMemo(() => {
-//         if (!pseudoLabel?.layers || !Array.isArray(pseudoLabel.layers)) return [];
-//
-//         return pseudoLabel.layers.map((layer) => {
-//             const canvas = document.createElement('canvas');
-//             const ctx = canvas.getContext('2d');
-//             if (!ctx || !layer) return null;
-//
-//             const height = layer.length;
-//             const width = layer[0]?.length || 0;
-//
-//             canvas.width = width;
-//             canvas.height = height;
-//
-//             const imageData = ctx.createImageData(width, height);
-//
-//             for (let y = 0; y < height; y++) {
-//                 for (let x = 0; x < width; x++) {
-//                     const pixelIndex = (y * width + x) * 4;
-//                     const pixel = layer[y][x];
-//
-//                     if (Array.isArray(pixel)) {
-//                         imageData.data[pixelIndex] = pixel[0] || 0;
-//                         imageData.data[pixelIndex + 1] = pixel[1] || 0;
-//                         imageData.data[pixelIndex + 2] = pixel[2] || 0;
-//                         imageData.data[pixelIndex + 3] = pixel[3] || 0;
-//                     } else {
-//                         imageData.data[pixelIndex] = pixel;
-//                         imageData.data[pixelIndex + 1] = pixel;
-//                         imageData.data[pixelIndex + 2] = pixel;
-//                         imageData.data[pixelIndex + 3] = pixel > 0 ? 128 : 0; // Semi-transparent overlay
-//                     }
-//                 }
-//             }
-//
-//             ctx.putImageData(imageData, 0, 0);
-//             return canvas.toDataURL();
-//         }).filter(Boolean);
-//     }, [pseudoLabel]);
-//
-//     return (
-//         <div className="bg-white rounded-lg shadow p-6">
-//             <div className="flex items-center justify-between mb-4">
-//                 <h3 className="text-lg font-semibold">Annotation Editor</h3>
-//                 <div className="flex items-center space-x-2">
-//                     <div className="flex items-center space-x-2">
-//                         <span className="text-sm text-gray-600">Brush:</span>
-//                         <button
-//                             onClick={() => onBrushColorChange('#ff0000')}
-//                             className={`w-6 h-6 rounded bg-red-500 border-2 ${
-//                                 brushColor === '#ff0000' ? 'border-gray-800' : 'border-gray-300'
-//                             }`}
-//                             title="Red brush"
-//                         />
-//                         <button
-//                             onClick={() => onBrushColorChange('#00ff00')}
-//                             className={`w-6 h-6 rounded bg-green-500 border-2 ${
-//                                 brushColor === '#00ff00' ? 'border-gray-800' : 'border-gray-300'
-//                             }`}
-//                             title="Green brush"
-//                         />
-//                         <button
-//                             onClick={() => onBrushColorChange('#0000ff')}
-//                             className={`w-6 h-6 rounded bg-blue-500 border-2 ${
-//                                 brushColor === '#0000ff' ? 'border-gray-800' : 'border-gray-300'
-//                             }`}
-//                             title="Blue brush"
-//                         />
-//                         <button
-//                             onClick={() => onBrushColorChange('#ffffff')}
-//                             className={`w-6 h-6 rounded bg-white border-2 ${
-//                                 brushColor === '#ffffff' ? 'border-gray-800' : 'border-gray-300'
-//                             }`}
-//                             title="Eraser"
-//                         />
-//                     </div>
-//                     <button
-//                         onClick={onSubmitAnnotation}
-//                         disabled={isSubmitting}
-//                         className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-//                     >
-//                         <CheckCircle className="h-4 w-4" />
-//                         <span>{isSubmitting ? 'Submitting...' : 'Accept'}</span>
-//                     </button>
-//                 </div>
-//             </div>
-//
-//             <div className="border rounded-lg p-4 bg-gray-50">
-//                 <div className="text-sm text-gray-600 mb-2">
-//                     Image: {selectedImagePath?.split('/').pop()}
-//                 </div>
-//
-//                 {/* Image Display with Pseudo Label */}
-//                 <div className="relative w-full h-64 bg-gray-200 rounded overflow-hidden">
-//                     {backgroundImageSrc ? (
-//                         <div className="relative w-full h-full">
-//                             {/* Background Image */}
-//                             <img
-//                                 src={backgroundImageSrc}
-//                                 alt="Background"
-//                                 className="absolute inset-0 w-full h-full object-contain"
-//                             />
-//
-//                             {/* Layer Overlays */}
-//                             {layerOverlays.map((layerSrc, index) => (
-//                                 layerSrc && (
-//                                     <img
-//                                         key={index}
-//                                         src={layerSrc}
-//                                         alt={`Layer ${index}`}
-//                                         className="absolute inset-0 w-full h-full object-contain opacity-60"
-//                                         style={{ mixBlendMode: 'multiply' }}
-//                                     />
-//                                 )
-//                             ))}
-//
-//                             {/* Canvas for drawing would go here */}
-//                             <div className="absolute inset-0 w-full h-full flex items-center justify-center pointer-events-none">
-//                                 <span className="text-white bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
-//                                     Interactive annotation canvas overlay
-//                                 </span>
-//                             </div>
-//                         </div>
-//                     ) : (
-//                         <div className="w-full h-full flex items-center justify-center">
-//                             <span className="text-gray-500">Loading pseudo label...</span>
-//                         </div>
-//                     )}
-//                 </div>
-//
-//                 {/* Pseudo Label Info */}
-//                 {pseudoLabel && (
-//                     <div className="mt-2 text-xs text-gray-500">
-//                         <div>Background: {pseudoLabel.background?.length || 0} × {pseudoLabel.background?.[0]?.length || 0}</div>
-//                         <div>Layers: {pseudoLabel.layers?.length || 0}</div>
-//                         <div>Source: {pseudoLabel.image_path?.split('/').pop() || 'Unknown'}</div>
-//                     </div>
-//                 )}
-//             </div>
-//         </div>
-//     );
-// };
-
 import type { PseudoLabel } from "../../models";
-import React from "react";
-import { Card, Button, Space, Typography, Tooltip, Tag, Spin, Divider } from "antd";
-import { CheckOutlined, BgColorsOutlined, LoadingOutlined } from "@ant-design/icons";
+import React, { useRef, useEffect, useState } from "react";
+import { Button, Space, Typography, Tooltip, Tag, Spin, Divider } from "antd";
+import { CheckOutlined, BgColorsOutlined, LoadingOutlined, UndoOutlined, DeleteOutlined } from "@ant-design/icons";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 export const AnnotationEditor: React.FC<{
     pseudoLabel: PseudoLabel;
-    selectedImagePath: string;
+    selectedImageContent: string;
     brushColor: string;
     isSubmitting: boolean;
     onBrushColorChange: (color: string) => void;
     onSubmitAnnotation: () => void;
-}> = ({ pseudoLabel, selectedImagePath, brushColor, isSubmitting, onBrushColorChange, onSubmitAnnotation }) => {
+}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, onBrushColorChange, onSubmitAnnotation }) => {
+    const { layers, background } = pseudoLabel;
 
-    // Convert pseudoLabel background to displayable image
-    const backgroundImageSrc = React.useMemo(() => {
-        if (!pseudoLabel?.background) return null;
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const drawing = useRef(false);
+    const [strokes, setStrokes] = useState<ImageData[]>([]);
 
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return null;
-
-        const height = pseudoLabel.background.length;
-        const width = pseudoLabel.background[0].length;
-
-        canvas.width = width;
-        canvas.height = height;
-
-        const imageData = ctx.createImageData(width, height);
-
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const pixelIndex = (y * width + x) * 4;
-                const pixel = pseudoLabel.background[y][x];
-
-                // Handle different pixel formats
-                if (Array.isArray(pixel)) {
-                    imageData.data[pixelIndex] = pixel[0] || 0;     // R
-                    imageData.data[pixelIndex + 1] = pixel[1] || 0; // G
-                    imageData.data[pixelIndex + 2] = pixel[2] || 0; // B
-                    imageData.data[pixelIndex + 3] = pixel[3] !== undefined ? pixel[3] : 255; // A
-                } else {
-                    // Grayscale
-                    imageData.data[pixelIndex] = pixel;
-                    imageData.data[pixelIndex + 1] = pixel;
-                    imageData.data[pixelIndex + 2] = pixel;
-                    imageData.data[pixelIndex + 3] = 255;
-                }
-            }
+    // const draw = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    //     ctx.fillStyle = brushColor;
+    //     ctx.beginPath();
+    //     ctx.arc(x, y, 5, 0, 2 * Math.PI);
+    //     ctx.fill();
+    // };
+    const draw = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+        if (brushColor.toLowerCase() === "#ffffff") {
+            // Eraser: clear a small area around the point
+            ctx.clearRect(x - 5, y - 5, 10, 10);
+        } else {
+            ctx.fillStyle = brushColor;
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fill();
         }
+    };
 
-        ctx.putImageData(imageData, 0, 0);
-        return canvas.toDataURL();
-    }, [pseudoLabel]);
 
-    // Convert layers to overlay images
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const handleMouseDown = (e: MouseEvent) => {
+            drawing.current = true;
+            setStrokes((prev) => [...prev, ctx.getImageData(0, 0, canvas.width, canvas.height)]);
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            draw(ctx, x, y);
+        };
+
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!drawing.current) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            draw(ctx, x, y);
+        };
+
+        const handleMouseUp = () => {
+            drawing.current = false;
+        };
+
+        canvas.addEventListener("mousedown", handleMouseDown);
+        canvas.addEventListener("mousemove", handleMouseMove);
+        canvas.addEventListener("mouseup", handleMouseUp);
+        canvas.addEventListener("mouseleave", handleMouseUp);
+
+        return () => {
+            canvas.removeEventListener("mousedown", handleMouseDown);
+            canvas.removeEventListener("mousemove", handleMouseMove);
+            canvas.removeEventListener("mouseup", handleMouseUp);
+            canvas.removeEventListener("mouseleave", handleMouseUp);
+        };
+    }, [brushColor, draw]);
+
+
+    const handleUndo = () => {
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (!canvas || !ctx || strokes.length === 0) return;
+
+        const last = strokes[strokes.length - 1];
+        ctx.putImageData(last, 0, 0);
+        setStrokes((prev) => prev.slice(0, -1));
+    };
+
+    const handleReset = () => {
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (!canvas || !ctx) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        setStrokes([]);
+    };
+
+    const backgroundImageSrc = selectedImageContent;
+
     const layerOverlays = React.useMemo(() => {
-        if (!pseudoLabel?.layers || !Array.isArray(pseudoLabel.layers)) return [];
-
-        return pseudoLabel.layers.map((layer) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx || !layer) return null;
-
-            const height = layer.length;
-            const width = layer[0]?.length || 0;
-
-            canvas.width = width;
-            canvas.height = height;
-
-            const imageData = ctx.createImageData(width, height);
-
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    const pixelIndex = (y * width + x) * 4;
-                    const pixel = layer[y][x];
-
-                    if (Array.isArray(pixel)) {
-                        imageData.data[pixelIndex] = pixel[0] || 0;
-                        imageData.data[pixelIndex + 1] = pixel[1] || 0;
-                        imageData.data[pixelIndex + 2] = pixel[2] || 0;
-                        imageData.data[pixelIndex + 3] = pixel[3] || 0;
+        return layers.map((layerArr) => {
+            const h = layerArr.length;
+            const w = layerArr[0]?.length || 0;
+            const canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return null;
+            const imgData = ctx.createImageData(w, h);
+            for (let y = 0; y < h; ++y) {
+                for (let x = 0; x < w; ++x) {
+                    const pix = layerArr[y][x];
+                    const idx = (y * w + x) * 4;
+                    if (Array.isArray(pix)) {
+                        imgData.data[idx]     = pix[0] ?? 0;
+                        imgData.data[idx + 1] = pix[1] ?? 0;
+                        imgData.data[idx + 2] = pix[2] ?? 0;
+                        imgData.data[idx + 3] = pix[3] ?? 0;
                     } else {
-                        imageData.data[pixelIndex] = pixel;
-                        imageData.data[pixelIndex + 1] = pixel;
-                        imageData.data[pixelIndex + 2] = pixel;
-                        imageData.data[pixelIndex + 3] = pixel > 0 ? 128 : 0; // Semi-transparent overlay
+                        imgData.data[idx] = pix;
+                        imgData.data[idx + 1] = pix;
+                        imgData.data[idx + 2] = pix;
+                        imgData.data[idx + 3] = pix > 0 ? 128 : 0;
                     }
                 }
             }
-
-            ctx.putImageData(imageData, 0, 0);
+            ctx.putImageData(imgData, 0, 0);
             return canvas.toDataURL();
-        }).filter(Boolean);
-    }, [pseudoLabel]);
+        }).filter(Boolean) as string[];
+    }, [layers]);
 
     const brushOptions = [
-        { color: '#ff0000', name: 'Red', bgColor: '#ff4d4f' },
-        { color: '#00ff00', name: 'Green', bgColor: '#52c41a' },
-        { color: '#0000ff', name: 'Blue', bgColor: '#1890ff' },
-        { color: '#ffffff', name: 'Eraser', bgColor: '#ffffff', textColor: '#000' }
+        { color: "#ff0000", name: "Red", bgColor: "#ff4d4f" },
+        { color: "#00ff00", name: "Green", bgColor: "#52c41a" },
+        { color: "#ffffff", name: "Eraser", bgColor: "#fff", textColor: "#000" },
     ];
 
     return (
-        <Card
-            size="default"
-            style={{
-                borderRadius: 8,
-                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-            }}
-        >
-            {/* Header */}
-            <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <Title level={4} style={{ margin: 0 }}>
-                        Annotation Editor
-                    </Title>
-
-                    <Space size="middle">
-                        {/* Brush Color Selector */}
-                        <Space>
-                            <BgColorsOutlined style={{ color: '#666' }} />
-                            <Text type="secondary" style={{ fontSize: 12 }}>Brush:</Text>
-                            <Space size="small">
-                                {brushOptions.map((brush) => (
-                                    <Tooltip key={brush.color} title={brush.name}>
-                                        <Button
-                                            size="small"
-                                            shape="circle"
-                                            onClick={() => onBrushColorChange(brush.color)}
-                                            style={{
-                                                backgroundColor: brush.bgColor,
-                                                borderColor: brushColor === brush.color ? '#333' : '#d9d9d9',
-                                                borderWidth: brushColor === brush.color ? 2 : 1,
-                                                color: brush.textColor || '#fff',
-                                                width: 24,
-                                                height: 24,
-                                                minWidth: 24
-                                            }}
-                                        />
-                                    </Tooltip>
-                                ))}
-                            </Space>
-                        </Space>
-
-                        {/* Accept Button */}
-                        <Button
-                            type="primary"
-                            icon={isSubmitting ? <LoadingOutlined /> : <CheckOutlined />}
-                            loading={isSubmitting}
-                            onClick={onSubmitAnnotation}
-                            size="middle"
-                        >
-                            {isSubmitting ? 'Submitting...' : 'Accept'}
-                        </Button>
-                    </Space>
-                </div>
-
-                <Divider style={{ margin: 0 }} />
-            </div>
-
-            {/* Content */}
-            <div style={{
-                padding: 16,
-                backgroundColor: '#fafafa',
-                borderRadius: 6,
-                border: '1px solid #f0f0f0'
-            }}>
-                {/* Image Path */}
-                <div style={{ marginBottom: 12 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                        Image: <Text code>{selectedImagePath?.split('/').pop()}</Text>
-                    </Text>
-                </div>
-
-                {/* Image Display with Pseudo Label */}
-                <div style={{
-                    position: 'relative',
-                    width: '100%',
-                    height: 320,
-                    backgroundColor: '#f5f5f5',
-                    borderRadius: 6,
-                    overflow: 'hidden',
-                    border: '1px solid #e8e8e8'
-                }}>
-                    {backgroundImageSrc ? (
-                        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                            {/* Background Image */}
-                            <img
-                                src={backgroundImageSrc}
-                                alt="Background"
-                                style={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain'
-                                }}
-                            />
-
-                            {/* Layer Overlays */}
-                            {layerOverlays.map((layerSrc, index) => (
-                                layerSrc && (
-                                    <img
-                                        key={index}
-                                        src={layerSrc}
-                                        alt={`Layer ${index}`}
+        <>
+        <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+                <Space size="middle">
+                    <Space>
+                        <BgColorsOutlined style={{ color: "#666" }} />
+                        <Text type="secondary" style={{ fontSize: 12 }}>Brush:</Text>
+                        <Space size="small">
+                            {brushOptions.map(b => (
+                                <Tooltip key={b.color} title={b.name}>
+                                    <Button
+                                        size="small" shape="circle"
+                                        onClick={() => onBrushColorChange(b.color)}
                                         style={{
-                                            position: 'absolute',
-                                            top: 0,
-                                            left: 0,
-                                            width: '100%',
-                                            height: '100%',
-                                            objectFit: 'contain',
-                                            opacity: 0.6,
-                                            mixBlendMode: 'multiply'
+                                            backgroundColor: b.bgColor,
+                                            borderColor: brushColor === b.color ? "#333" : "#d9d9d9",
+                                            borderWidth: brushColor === b.color ? 2 : 1,
+                                            color: b.textColor || "#fff",
+                                            width: 24, height: 24, minWidth: 24,
                                         }}
                                     />
-                                )
+                                </Tooltip>
                             ))}
+                        </Space>
+                    </Space>
+                    <Tooltip title="Undo">
+                        <Button icon={<UndoOutlined />} onClick={handleUndo} />
+                    </Tooltip>
+                    <Tooltip title="Reset">
+                        <Button icon={<DeleteOutlined />} onClick={handleReset} />
+                    </Tooltip>
+                    <Button type="primary" icon={isSubmitting ? <LoadingOutlined /> : <CheckOutlined />}
+                            loading={isSubmitting} onClick={onSubmitAnnotation}>
+                        {isSubmitting ? "Submitting..." : "Accept"}
+                    </Button>
+                </Space>
+            </div>
+            <Divider style={{ margin: 0 }} />
+        </div>
 
-                            {/* Canvas Overlay Placeholder */}
-                            <div style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                height: '100%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                pointerEvents: 'none'
-                            }}>
-                                <Tag color="processing" style={{ fontSize: 11 }}>
-                                    Interactive annotation canvas overlay
-                                </Tag>
-                            </div>
-                        </div>
-                    ) : (
-                        <div style={{
-                            width: '100%',
-                            height: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}>
-                            <Space>
-                                <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
-                                <Text type="secondary">Loading pseudo label...</Text>
-                            </Space>
-                        </div>
-                    )}
-                </div>
+        <div style={{ padding: 16, backgroundColor: "#fafafa", borderRadius: 6, border: "1px solid #f0f0f0" }}>
+            <div style={{
+                position: "relative",
+                width: "100%", height: 320,
+                backgroundColor: "#f5f5f5", borderRadius: 6,
+                overflow: "hidden", border: "1px solid #e8e8e8"
+            }}>
+                {backgroundImageSrc ? (
+                    <>
+                        <img
+                            src={`data:image/jpeg;base64,${backgroundImageSrc}`}
+                            alt="Background"
+                            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain" }}
+                        />
 
-                {/* Pseudo Label Info */}
-                {pseudoLabel && (
-                    <div style={{ marginTop: 12 }}>
-                        <Space size="middle" wrap>
-                            <Tag color="blue">
-                                Background: {pseudoLabel.background?.length || 0} × {pseudoLabel.background?.[0]?.length || 0}
-                            </Tag>
-                            <Tag color="green">
-                                Layers: {pseudoLabel.layers?.length || 0}
-                            </Tag>
-                            <Tag color="orange">
-                                Source: {pseudoLabel.image_path?.split('/').pop() || 'Unknown'}
-                            </Tag>
+                        {layerOverlays.map((src, i) => (
+                            <img key={i} src={src} alt={`Layer ${i}`}
+                                 style={{
+                                     position: "absolute", top: 0, left: 0,
+                                     width: "100%", height: "100%",
+                                     objectFit: "contain",
+                                     opacity: 0.6,
+                                     mixBlendMode: "multiply"
+                                 }}
+                            />
+                        ))}
+
+                        <canvas
+                            ref={canvasRef}
+                            width={640}
+                            height={320}
+                            style={{
+                                position: "absolute", top: 0, left: 0,
+                                width: "100%", height: "100%",
+                                cursor: "crosshair"
+                            }}
+                        />
+                    </>
+                ) : (
+                    <div style={{
+                        width: "100%", height: "100%",
+                        display: "flex", alignItems: "center", justifyContent: "center"
+                    }}>
+                        <Space>
+                            <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+                            <Text type="secondary">Loading image...</Text>
                         </Space>
                     </div>
                 )}
             </div>
-        </Card>
+
+            {background && (
+                <div style={{ marginTop: 12 }}>
+                    <Space size="middle" wrap>
+                        <Tag color="blue">Background: {background.length} × {background[0]?.length}</Tag>
+                        <Tag color="green">Layers: {layers.length}</Tag>
+                    </Space>
+                </div>
+            )}
+        </div>
+        </>
     );
 };

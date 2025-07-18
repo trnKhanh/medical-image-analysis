@@ -1,12 +1,12 @@
 import axios, {type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import type {
     Config,
-    SystemStatus,
     CheckpointResponse,
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
     AnnotationData,
+    ActiveLearningState,
 } from '../models';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -17,7 +17,7 @@ const API_BASE_URL = 'http://localhost:8000/api/v1';
  */
 const apiClient: AxiosInstance = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 10_000,
+    timeout: 100_000,
     headers: { Accept: 'application/json' },
 });
 
@@ -65,17 +65,17 @@ class ApiService {
 
     // ------------------- High‑level convenience methods -----------------------
 
-    getStatus(): Promise<SystemStatus> {
-        return this.request<SystemStatus>({ url: '/status' });
+    getStatus(): Promise<ActiveLearningState> {
+        return this.request<ActiveLearningState>({ url: '/active-learning/state' });
     }
 
     getConfig(): Promise<Config> {
-        return this.request<Config>({ url: '/config' });
+        return this.request<Config>({ url: '/active-learning/config' });
     }
 
     updateConfig(config: Partial<Config>): Promise<void> {
         return this.request<void>({
-            url: '/config',
+            url: '/active-learning/config',
             method: 'POST',
             data: config,
         });
@@ -104,20 +104,20 @@ class ApiService {
 
     selectSamples(): Promise<SelectionResponse> {
         return this.request<SelectionResponse>({
-            url: '/select/samples',
+            url: '/active-learning/select/samples',
             method: 'POST',
         });
     }
 
-    getPseudoLabel(imagePath: string): Promise<PseudoLabel> {
+    getPseudoLabel(imageIndex: number): Promise<PseudoLabel> {
         return this.request<PseudoLabel>({
-            url: `/pseudo-label/${encodeURIComponent(imagePath)}`,
+            url: `/active-learning/pseudo-label/${encodeURIComponent(imageIndex)}`,
         });
     }
 
     submitAnnotation(annotation: AnnotationData): Promise<{ message: string }> {
         return this.request({
-            url: '/annotate',
+            url: '/active-learning/annotate',
             method: 'POST',
             data: annotation,
         });
@@ -125,12 +125,12 @@ class ApiService {
 
     getAnnotatedSamples(): Promise<{ annotated_samples: AnnotatedSample[] }> {
         return this.request({
-            url: '/annotated/samples',
+            url: '/active-learning/annotated',
         });
     }
 
     async downloadDataset(): Promise<Blob> {
-        const { data } = await apiClient.get<Blob>('/download/dataset', {
+        const { data } = await apiClient.get<Blob>('/dataset/download', {
             responseType: 'blob',
         });
         return data;

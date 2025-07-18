@@ -8,6 +8,7 @@ import { AnnotationEditor } from './components/annotation/AnnotationEditor';
 import { AnnotatedSamplesPanel } from './components/samples/AnnotatedSamplesPanel';
 import { useApp } from './hooks/useApp';
 import './styles/App.css';
+import {Modal} from "antd";
 
 const App: React.FC = () => {
     const {
@@ -35,22 +36,24 @@ const App: React.FC = () => {
         uploadFiles,
         selectSamples,
         submitAnnotation,
+        cancelAnnotation,
         downloadDataset,
         resetSystem,
+        syncSystem,
         startAnnotation,
         loadAvailableCheckpoints
     } = useApp();
 
     return (
         <div className="min-h-screen bg-gray-50">
-            {/* Header */}
             <Header
                 status={status}
                 onReset={resetSystem}
                 isResetting={loading.reset}
+                isSyncing={loading.sync}
+                onSync={syncSystem}
             />
 
-            {/* Notifications */}
             {error && (
                 <Notification
                     type="error"
@@ -107,16 +110,25 @@ const App: React.FC = () => {
                             onStartAnnotation={startAnnotation}
                         />
 
-                        {isAnnotating && pseudoLabel && selectedImageIndex !== null && (
-                            <AnnotationEditor
-                                pseudoLabel={pseudoLabel}
-                                selectedImagePath={selectedSamples[selectedImageIndex]}
-                                brushColor={brushColor}
-                                isSubmitting={loading.annotate}
-                                onBrushColorChange={setBrushColor}
-                                onSubmitAnnotation={submitAnnotation}
-                            />
-                        )}
+                        <Modal
+                            open={isAnnotating && !!pseudoLabel && selectedImageIndex !== null}
+                            title="Annotation Editor"
+                            onCancel={cancelAnnotation}
+                            footer={null}
+                            width="auto"
+                            style={{ top: 24 }}
+                        >
+                            {isAnnotating && pseudoLabel && selectedImageIndex !== null && (
+                                <AnnotationEditor
+                                    pseudoLabel={pseudoLabel}
+                                    selectedImageContent={selectedSamples[selectedImageIndex].data}
+                                    brushColor={brushColor}
+                                    isSubmitting={loading.annotate}
+                                    onBrushColorChange={setBrushColor}
+                                    onSubmitAnnotation={submitAnnotation}
+                                />
+                            )}
+                        </Modal>
                     </div>
 
                     <div className="space-y-6">

@@ -17,11 +17,11 @@ class FoundationModelManager:
         self.is_initialized = False
         self.executor = ThreadPoolExecutor(max_workers=1)
 
-    async def initialize(self):
+    async def initialize(self, device: str = settings.DEVICE):
         """Initialize the foundation model."""
         if self.is_initialized:
-            return
-
+            return self.model, self.preprocess, None
+        self.device = torch.device(device)
         def _load_model():
             if settings.DEFAULT_FOUNDATION_MODEL == "BiomedCLIP":
                 model, preprocess = create_model_from_pretrained(
@@ -33,7 +33,6 @@ class FoundationModelManager:
                 return model, preprocess, tokenizer
             else:
                 raise RuntimeError(f"Unsupported foundation model: {settings.DEFAULT_FOUNDATION_MODEL}")
-
         try:
             loop = asyncio.get_event_loop()
             self.model, self.preprocess, self.tokenizer = await loop.run_in_executor(
@@ -41,6 +40,7 @@ class FoundationModelManager:
             )
             self.is_initialized = True
             print(f"Foundation model {settings.DEFAULT_FOUNDATION_MODEL} loaded successfully")
+            return self.model, self.preprocess, None
         except Exception as e:
             print(f"Failed to load foundation model: {e}")
             raise
