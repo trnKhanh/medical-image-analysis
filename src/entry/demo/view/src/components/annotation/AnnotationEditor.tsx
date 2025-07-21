@@ -1,7 +1,11 @@
+
 import type { PseudoLabel } from "../../models";
 import React, { useRef, useEffect, useState } from "react";
-import { Button, Space, Typography, Tooltip, Tag, Spin, Divider } from "antd";
-import { CheckOutlined, BgColorsOutlined, LoadingOutlined, UndoOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Button, Space, Typography, Tooltip, Tag, Spin, Divider, Slider } from "antd";
+import {
+    CheckOutlined, BgColorsOutlined, LoadingOutlined,
+    UndoOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined
+} from "@ant-design/icons";
 
 const { Text } = Typography;
 
@@ -10,33 +14,87 @@ export const AnnotationEditor: React.FC<{
     selectedImageContent: string;
     brushColor: string;
     isSubmitting: boolean;
+    imageIndex: number;
     onBrushColorChange: (color: string) => void;
-    onSubmitAnnotation: () => void;
-}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, onBrushColorChange, onSubmitAnnotation }) => {
+    onSubmitAnnotation: (imageIndex: number, annotationData: any) => void;
+}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imageIndex, onBrushColorChange, onSubmitAnnotation }) => {
     const { layers, background } = pseudoLabel;
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const drawing = useRef(false);
     const [strokes, setStrokes] = useState<ImageData[]>([]);
+    const brushedPixels = useRef<Map<string, string>>(new Map());
+    const [zoom, setZoom] = useState(1);
+    const [brushSize, setBrushSize] = useState(5);
 
-    // const draw = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    //     ctx.fillStyle = brushColor;
-    //     ctx.beginPath();
-    //     ctx.arc(x, y, 5, 0, 2 * Math.PI);
-    //     ctx.fill();
-    // };
     const draw = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-        if (brushColor.toLowerCase() === "#ffffff") {
-            // Eraser: clear a small area around the point
-            ctx.clearRect(x - 5, y - 5, 10, 10);
+        const radius = brushSize * zoom;
+        const roundedX = Math.round(x);
+        const roundedY = Math.round(y);
+        const key = `${roundedX}_${roundedY}`;
+        const existingColor = brushedPixels.current.get(key);
+
+        const isErasing = brushColor.toLowerCase() === "#ffffff";
+
+        if (isErasing) {
+            ctx.clearRect(x - radius, y - radius, radius * 2, radius * 2);
+            brushedPixels.current.delete(key);
         } else {
+            if (existingColor && existingColor === brushColor) return;
+
+            ctx.clearRect(x - radius, y - radius, radius * 2, radius * 2);
+
+            const prevAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = 0.5;
+
             ctx.fillStyle = brushColor;
             ctx.beginPath();
-            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
             ctx.fill();
+
+            ctx.globalAlpha = prevAlpha;
+
+            brushedPixels.current.set(key, brushColor);
         }
     };
 
+    const getAnnotationData = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        const annotationMask = [];
+        for (let y = 0; y < canvas.height; y++) {
+            const row = [];
+            for (let x = 0; x < canvas.width; x++) {
+                const index = (y * canvas.width + x) * 4;
+                const alpha = imageData.data[index + 3];
+                row.push(alpha > 0 ? 1 : 0);
+            }
+            annotationMask.push(row);
+        }
+
+        return {
+            image_index: imageIndex,
+            annotation_mask: annotationMask,
+            brush_strokes: Array.from(brushedPixels.current.entries()).map(([position, color]) => ({
+                position,
+                color,
+                brush_size: brushSize
+            }))
+        };
+    };
+
+    const handleSubmitAnnotation = () => {
+        const annotationData = getAnnotationData();
+        if (annotationData) {
+            onSubmitAnnotation(imageIndex, annotationData);
+        }
+    };
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -80,8 +138,7 @@ export const AnnotationEditor: React.FC<{
             canvas.removeEventListener("mouseup", handleMouseUp);
             canvas.removeEventListener("mouseleave", handleMouseUp);
         };
-    }, [brushColor, draw]);
-
+    }, [brushColor, brushSize, zoom]);
 
     const handleUndo = () => {
         const canvas = canvasRef.current;
@@ -91,6 +148,7 @@ export const AnnotationEditor: React.FC<{
         const last = strokes[strokes.length - 1];
         ctx.putImageData(last, 0, 0);
         setStrokes((prev) => prev.slice(0, -1));
+        brushedPixels.current.clear(); // optionally restore pixels
     };
 
     const handleReset = () => {
@@ -100,6 +158,7 @@ export const AnnotationEditor: React.FC<{
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         setStrokes([]);
+        brushedPixels.current.clear();
     };
 
     const backgroundImageSrc = selectedImageContent;
@@ -144,105 +203,127 @@ export const AnnotationEditor: React.FC<{
 
     return (
         <>
-        <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-                <Space size="middle">
-                    <Space>
-                        <BgColorsOutlined style={{ color: "#666" }} />
-                        <Text type="secondary" style={{ fontSize: 12 }}>Brush:</Text>
-                        <Space size="small">
-                            {brushOptions.map(b => (
-                                <Tooltip key={b.color} title={b.name}>
-                                    <Button
-                                        size="small" shape="circle"
-                                        onClick={() => onBrushColorChange(b.color)}
-                                        style={{
-                                            backgroundColor: b.bgColor,
-                                            borderColor: brushColor === b.color ? "#333" : "#d9d9d9",
-                                            borderWidth: brushColor === b.color ? 2 : 1,
-                                            color: b.textColor || "#fff",
-                                            width: 24, height: 24, minWidth: 24,
-                                        }}
-                                    />
-                                </Tooltip>
-                            ))}
-                        </Space>
-                    </Space>
-                    <Tooltip title="Undo">
-                        <Button icon={<UndoOutlined />} onClick={handleUndo} />
-                    </Tooltip>
-                    <Tooltip title="Reset">
-                        <Button icon={<DeleteOutlined />} onClick={handleReset} />
-                    </Tooltip>
-                    <Button type="primary" icon={isSubmitting ? <LoadingOutlined /> : <CheckOutlined />}
-                            loading={isSubmitting} onClick={onSubmitAnnotation}>
-                        {isSubmitting ? "Submitting..." : "Accept"}
-                    </Button>
-                </Space>
-            </div>
-            <Divider style={{ margin: 0 }} />
-        </div>
-
-        <div style={{ padding: 16, backgroundColor: "#fafafa", borderRadius: 6, border: "1px solid #f0f0f0" }}>
-            <div style={{
-                position: "relative",
-                width: "100%", height: 320,
-                backgroundColor: "#f5f5f5", borderRadius: 6,
-                overflow: "hidden", border: "1px solid #e8e8e8"
-            }}>
-                {backgroundImageSrc ? (
-                    <>
-                        <img
-                            src={`data:image/jpeg;base64,${backgroundImageSrc}`}
-                            alt="Background"
-                            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain" }}
-                        />
-
-                        {layerOverlays.map((src, i) => (
-                            <img key={i} src={src} alt={`Layer ${i}`}
-                                 style={{
-                                     position: "absolute", top: 0, left: 0,
-                                     width: "100%", height: "100%",
-                                     objectFit: "contain",
-                                     opacity: 0.6,
-                                     mixBlendMode: "multiply"
-                                 }}
-                            />
-                        ))}
-
-                        <canvas
-                            ref={canvasRef}
-                            width={640}
-                            height={320}
-                            style={{
-                                position: "absolute", top: 0, left: 0,
-                                width: "100%", height: "100%",
-                                cursor: "crosshair"
-                            }}
-                        />
-                    </>
-                ) : (
-                    <div style={{
-                        width: "100%", height: "100%",
-                        display: "flex", alignItems: "center", justifyContent: "center"
-                    }}>
+            <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap" }}>
+                    <Space size="middle" wrap>
                         <Space>
-                            <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
-                            <Text type="secondary">Loading image...</Text>
+                            <BgColorsOutlined style={{ color: "#666" }} />
+                            <Text type="secondary" style={{ fontSize: 12 }}>Brush:</Text>
+                            <Space size="small">
+                                {brushOptions.map(b => (
+                                    <Tooltip key={b.color} title={b.name}>
+                                        <Button
+                                            size="small" shape="circle"
+                                            onClick={() => onBrushColorChange(b.color)}
+                                            style={{
+                                                backgroundColor: b.bgColor,
+                                                borderColor: brushColor === b.color ? "#333" : "#d9d9d9",
+                                                borderWidth: brushColor === b.color ? 2 : 1,
+                                                color: b.textColor || "#fff",
+                                                width: 24, height: 24, minWidth: 24,
+                                            }}
+                                        />
+                                    </Tooltip>
+                                ))}
+                            </Space>
+                        </Space>
+
+                        <Space>
+                            <Tooltip title="Zoom In">
+                                <Button icon={<ZoomInOutlined />} onClick={() => setZoom(prev => Math.min(prev + 0.25, 5))} />
+                            </Tooltip>
+                            <Tooltip title="Zoom Out">
+                                <Button icon={<ZoomOutOutlined />} onClick={() => setZoom(prev => Math.max(prev - 0.25, 0.25))} />
+                            </Tooltip>
+                            <Text type="secondary">Zoom: {Math.round(zoom * 100)}%</Text>
+                        </Space>
+
+                        <Space>
+                            <Text type="secondary">Brush Size:</Text>
+                            <Slider
+                                min={1} max={20} step={1}
+                                value={brushSize}
+                                onChange={setBrushSize}
+                                style={{ width: 120 }}
+                            />
+                        </Space>
+
+                        <Tooltip title="Undo">
+                            <Button icon={<UndoOutlined />} onClick={handleUndo} />
+                        </Tooltip>
+                        <Tooltip title="Reset">
+                            <Button icon={<DeleteOutlined />} onClick={handleReset} />
+                        </Tooltip>
+
+                        <Button type="primary" icon={isSubmitting ? <LoadingOutlined /> : <CheckOutlined />}
+                                loading={isSubmitting} onClick={handleSubmitAnnotation}>
+                            {isSubmitting ? "Submitting..." : "Accept"}
+                        </Button>
+                    </Space>
+                </div>
+                <Divider style={{ margin: 0 }} />
+            </div>
+
+            <div style={{ padding: 16, backgroundColor: "#fafafa", borderRadius: 6, border: "1px solid #f0f0f0" }}>
+                <div style={{
+                    position: "relative",
+                    width: "100%", height: 320,
+                    backgroundColor: "#f5f5f5", borderRadius: 6,
+                    overflow: "hidden", border: "1px solid #e8e8e8"
+                }}>
+                    {backgroundImageSrc ? (
+                        <>
+                            <img
+                                src={`data:image/jpeg;base64,${backgroundImageSrc}`}
+                                alt="Background"
+                                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "contain" }}
+                            />
+
+                            {layerOverlays.map((src, i) => (
+                                <img key={i} src={src} alt={`Layer ${i}`}
+                                     style={{
+                                         position: "absolute", top: 0, left: 0,
+                                         width: "100%", height: "100%",
+                                         objectFit: "contain",
+                                         opacity: 0.6,
+                                         mixBlendMode: "multiply"
+                                     }}
+                                />
+                            ))}
+
+                            <canvas
+                                ref={canvasRef}
+                                width={640}
+                                height={320}
+                                style={{
+                                    position: "absolute", top: 0, left: 0,
+                                    width: "100%", height: "100%",
+                                    cursor: "crosshair"
+                                }}
+                            />
+                        </>
+                    ) : (
+                        <div style={{
+                            width: "100%", height: "100%",
+                            display: "flex", alignItems: "center", justifyContent: "center"
+                        }}>
+                            <Space>
+                                <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+                                <Text type="secondary">Loading image...</Text>
+                            </Space>
+                        </div>
+                    )}
+                </div>
+
+                {background && (
+                    <div style={{ marginTop: 12 }}>
+                        <Space size="middle" wrap>
+                            <Tag color="blue">Background: {background.length} × {background[0]?.length}</Tag>
+                            <Tag color="green">Layers: {layers.length}</Tag>
                         </Space>
                     </div>
                 )}
             </div>
-
-            {background && (
-                <div style={{ marginTop: 12 }}>
-                    <Space size="middle" wrap>
-                        <Tag color="blue">Background: {background.length} × {background[0]?.length}</Tag>
-                        <Tag color="green">Layers: {layers.length}</Tag>
-                    </Space>
-                </div>
-            )}
-        </div>
         </>
     );
 };

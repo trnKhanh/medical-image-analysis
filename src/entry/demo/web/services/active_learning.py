@@ -91,12 +91,11 @@ class ActiveLearningService:
             self.config.loaded_feature_only = config_request.loaded_feature_only
             self.config.model_ckpt = config_request.model_ckpt
 
-            # Reset feature dict when config changes
             self.feature_dict = None
 
             return ActiveLearningConfigResponse(
                 message="Configuration updated successfully",
-                config=config_request.dict()
+                config=config_request.model_dump()
             )
         except Exception as e:
             return ActiveLearningConfigResponse(

@@ -26,15 +26,22 @@ apiClient.interceptors.response.use(
     (res) => res,
     (err) => {
         console.error('API call failed:', err);
-        return Promise.reject(
-            new Error(
-                err.response
-                    ? `HTTP ${err.response.status}: ${err.response.data?.detail ?? err.message}`
-                    : err.message,
-            ),
-        );
+        console.error('Response data:', err.response?.data);
+        console.error('Request config:', err.config);
+
+        let errorMessage = err.message;
+        if (err.response?.data) {
+            if (typeof err.response.data === 'object') {
+                errorMessage = `HTTP ${err.response.status}: ${JSON.stringify(err.response.data, null, 2)}`;
+            } else {
+                errorMessage = `HTTP ${err.response.status}: ${err.response.data}`;
+            }
+        }
+
+        return Promise.reject(new Error(errorMessage));
     },
 );
+
 
 class ApiService {
     private async request<T = unknown>(
