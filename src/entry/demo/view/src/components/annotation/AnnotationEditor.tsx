@@ -1,5 +1,5 @@
 
-import type { PseudoLabel } from "../../models";
+import type {AnnotationData, PseudoLabel} from "../../models";
 import React, { useRef, useEffect, useState } from "react";
 import { Button, Space, Typography, Tooltip, Tag, Spin, Divider, Slider } from "antd";
 import {
@@ -16,7 +16,7 @@ export const AnnotationEditor: React.FC<{
     isSubmitting: boolean;
     imageIndex: number;
     onBrushColorChange: (color: string) => void;
-    onSubmitAnnotation: (imageIndex: number, annotationData: any) => void;
+    onSubmitAnnotation: (annotationData: any) => void;
 }> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imageIndex, onBrushColorChange, onSubmitAnnotation }) => {
     const { layers, background } = pseudoLabel;
 
@@ -67,16 +67,57 @@ export const AnnotationEditor: React.FC<{
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        const annotationMask = [];
+        const annotationMask: number[][] = [];
+        const colorToClass: Record<string, number> = {
+            "#ff0000": 1,
+            "#00ff00": 2,
+        };
+
         for (let y = 0; y < canvas.height; y++) {
-            const row = [];
+            const row: number[] = [];
             for (let x = 0; x < canvas.width; x++) {
-                const index = (y * canvas.width + x) * 4;
-                const alpha = imageData.data[index + 3];
-                row.push(alpha > 0 ? 1 : 0);
+                const idx = (y * canvas.width + x) * 4;
+                const r = imageData.data[idx];
+                const g = imageData.data[idx + 1];
+                const b = imageData.data[idx + 2];
+                const a = imageData.data[idx + 3];
+
+                let label = 0;
+                if (a > 0) {
+                    const hex = rgbToHex(r, g, b);
+                    label = colorToClass[hex.toLowerCase()] ?? 0;
+                }
+
+                row.push(label);
             }
             annotationMask.push(row);
         }
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = canvas.width;
+        outputCanvas.height = canvas.height;
+        const outCtx = outputCanvas.getContext("2d");
+        const outputData = outCtx!.createImageData(canvas.width, canvas.height);
+
+        const classToColor: Record<number, [number, number, number]> = {
+            1: [255, 0, 0],
+            2: [0, 255, 0],
+        };
+
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                const label = annotationMask[y][x];
+                const [r, g, b] = classToColor[label] ?? [0, 0, 0];
+                const idx = (y * canvas.width + x) * 4;
+                outputData.data[idx] = r;
+                outputData.data[idx + 1] = g;
+                outputData.data[idx + 2] = b;
+                outputData.data[idx + 3] = label > 0 ? 255 : 0;
+            }
+        }
+
+        outCtx!.putImageData(outputData, 0, 0);
+        const layerBase64 = outputCanvas.toDataURL("image/png").split(",")[1];
 
         return {
             image_index: imageIndex,
@@ -85,14 +126,15 @@ export const AnnotationEditor: React.FC<{
                 position,
                 color,
                 brush_size: brushSize
-            }))
+            })),
+            layer_base64: layerBase64
         };
     };
 
     const handleSubmitAnnotation = () => {
         const annotationData = getAnnotationData();
         if (annotationData) {
-            onSubmitAnnotation(imageIndex, annotationData);
+            onSubmitAnnotation(annotationData);
         }
     };
 
@@ -327,3 +369,15 @@ export const AnnotationEditor: React.FC<{
         </>
     );
 };
+
+function rgbToHex(r: number, g: number, b: number): string {
+    return (
+        "#" +
+        [r, g, b]
+            .map((x) => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? "0" + hex : hex;
+            })
+            .join("")
+    );
+}

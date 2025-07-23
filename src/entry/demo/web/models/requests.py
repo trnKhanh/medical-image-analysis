@@ -1,4 +1,3 @@
-import base64
 from typing import List, Optional
 from fastapi import UploadFile
 

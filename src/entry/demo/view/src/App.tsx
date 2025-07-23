@@ -124,11 +124,9 @@ const App: React.FC = () => {
                                     selectedImageContent={selectedSamples[selectedImageIndex].data}
                                     brushColor={brushColor}
                                     isSubmitting={loading.annotate}
-                                    imageIndex={selectedImageIndex} // Thêm prop này
+                                    imageIndex={selectedImageIndex}
                                     onBrushColorChange={setBrushColor}
-                                    onSubmitAnnotation={(annotationData) => {
-                                        submitAnnotation(annotationData);
-                                    }}
+                                    onSubmitAnnotation={submitAnnotation}
                                 />
                             )}
                         </Modal>

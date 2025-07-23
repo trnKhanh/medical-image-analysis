@@ -5,7 +5,6 @@ import type {
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
-    AnnotationData,
     ActiveLearningState,
 } from '../models';
 
@@ -122,13 +121,19 @@ class ApiService {
         });
     }
 
-    submitAnnotation(annotation: AnnotationData): Promise<{ message: string }> {
+    submitAnnotation(annotation: any): Promise<{ message: string }> {
+        const formData = new FormData();
+        formData.append("image_index", annotation.image_index.toString());
+        formData.append("background", annotation.background);
+        formData.append("layers", JSON.stringify([annotation.layers]));
+
         return this.request({
             url: '/active-learning/annotate',
             method: 'POST',
-            data: annotation,
+            data: formData,
         });
     }
+
 
     getAnnotatedSamples(): Promise<{ annotated_samples: AnnotatedSample[] }> {
         return this.request({

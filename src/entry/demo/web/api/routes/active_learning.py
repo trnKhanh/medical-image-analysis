@@ -146,13 +146,11 @@ async def annotate_image(
     background: str = Form(...),
     layers: str = Form(...),
 ):
-
-    for i in active_learning_service.selected_set:
-        print("==========", i)
     if image_index >= len(active_learning_service.selected_set):
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Image not found")
 
-    layers_list = json.loads(layers)
+    # layers_list = json.loads(layers)
+    layers_list = layers
 
     if len(layers_list) > 0:
         layer_image = base64_to_image(layers_list[0])

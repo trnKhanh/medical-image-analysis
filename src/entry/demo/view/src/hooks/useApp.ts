@@ -5,7 +5,6 @@ import type {
     PseudoLabel,
     ModelCheckpoint,
     LoadingState,
-    AnnotationData,
     ActiveLearningState, SelectedSample
 } from '../models';
 import { apiService } from '../services/api';
@@ -132,9 +131,8 @@ export const useApp = () => {
         try {
             setLoading(prev => ({ ...prev, pseudo: true }));
             const result = await apiService.getPseudoLabel(imageIndex);
+            console.log("PSEUDO LABEL:", result);
             setPseudoLabel(result);
-
-            // Initialize mask data with zeros
             const height = result.background.length;
             const width = result.background[0].length;
             setMaskData(Array(height).fill(null).map(() => Array(width).fill(0)));
@@ -146,7 +144,7 @@ export const useApp = () => {
         }
     }, [showError]);
 
-    const submitAnnotation = useCallback(async () => {
+    const submitAnnotation = useCallback(async (annotationData: any) => {
         if (!pseudoLabel || selectedImageIndex === null) return;
 
         try {
@@ -154,14 +152,15 @@ export const useApp = () => {
 
             const backgroundBase64 = createImageFromBackground(pseudoLabel.background);
 
-            const annotation: AnnotationData = {
-                image_path: selectedSamples[selectedImageIndex].path,
-                mask_data: maskData,
-                background_image: backgroundBase64
+            const annotation = {
+                image_index: selectedImageIndex,
+                layers: [annotationData.annotation_mask],
+                background: backgroundBase64
             };
 
-            const result = await apiService.submitAnnotation(annotation);
-            showSuccess(result.message);
+            const response = await apiService.submitAnnotation(annotation);
+
+            showSuccess(response.message);
             await loadAnnotatedSamples();
             await loadStatus();
 
@@ -175,11 +174,18 @@ export const useApp = () => {
             }
         } catch (err) {
             showError('Failed to submit annotation');
-            console.error(err)
+            console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, annotate: false }));
         }
-    }, [pseudoLabel, selectedImageIndex, selectedSamples, maskData, showError, showSuccess, loadPseudoLabel]);
+    }, [
+        pseudoLabel,
+        selectedImageIndex,
+        selectedSamples,
+        showError,
+        showSuccess,
+        loadPseudoLabel
+    ]);
 
     const loadAnnotatedSamples = useCallback(async () => {
         try {
