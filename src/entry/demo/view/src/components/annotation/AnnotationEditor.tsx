@@ -1,5 +1,4 @@
-
-import type {AnnotationData, PseudoLabel} from "../../models";
+import type { PseudoLabel } from "../../models";
 import React, { useRef, useEffect, useState } from "react";
 import { Button, Space, Typography, Tooltip, Tag, Spin, Divider, Slider } from "antd";
 import {
@@ -16,7 +15,7 @@ export const AnnotationEditor: React.FC<{
     isSubmitting: boolean;
     imageIndex: number;
     onBrushColorChange: (color: string) => void;
-    onSubmitAnnotation: (annotationData: any) => void;
+    onSubmitAnnotation: (imageIndex: number, annotationData: any) => void;
 }> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imageIndex, onBrushColorChange, onSubmitAnnotation }) => {
     const { layers, background } = pseudoLabel;
 
@@ -26,36 +25,79 @@ export const AnnotationEditor: React.FC<{
     const brushedPixels = useRef<Map<string, string>>(new Map());
     const [zoom, setZoom] = useState(1);
     const [brushSize, setBrushSize] = useState(5);
+    const lastPosition = useRef<{ x: number; y: number } | null>(null);
 
-    const draw = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    const drawLine = (ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) => {
         const radius = brushSize * zoom;
+        const isErasing = brushColor.toLowerCase() === "#ffffff";
+
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = radius * 2;
+
+        if (isErasing) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.strokeStyle = "rgba(0,0,0,1)";
+        } else {
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 0.8;
+            ctx.strokeStyle = brushColor;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        const distance = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        const steps = Math.max(1, Math.ceil(distance));
+
+        for (let i = 0; i <= steps; i++) {
+            const t = steps === 0 ? 0 : i / steps;
+            const x = Math.round(x1 + (x2 - x1) * t);
+            const y = Math.round(y1 + (y2 - y1) * t);
+            const key = `${x}_${y}`;
+
+            if (isErasing) {
+                brushedPixels.current.delete(key);
+            } else {
+                brushedPixels.current.set(key, brushColor);
+            }
+        }
+
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1.0;
+    };
+
+    const drawPoint = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+        const radius = brushSize * zoom;
+        const isErasing = brushColor.toLowerCase() === "#ffffff";
         const roundedX = Math.round(x);
         const roundedY = Math.round(y);
         const key = `${roundedX}_${roundedY}`;
-        const existingColor = brushedPixels.current.get(key);
-
-        const isErasing = brushColor.toLowerCase() === "#ffffff";
 
         if (isErasing) {
-            ctx.clearRect(x - radius, y - radius, radius * 2, radius * 2);
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, 2 * Math.PI);
+            ctx.fill();
             brushedPixels.current.delete(key);
         } else {
+            const existingColor = brushedPixels.current.get(key);
             if (existingColor && existingColor === brushColor) return;
 
-            ctx.clearRect(x - radius, y - radius, radius * 2, radius * 2);
-
-            const prevAlpha = ctx.globalAlpha;
-            ctx.globalAlpha = 0.5;
-
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 0.8;
             ctx.fillStyle = brushColor;
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, 2 * Math.PI);
             ctx.fill();
-
-            ctx.globalAlpha = prevAlpha;
-
             brushedPixels.current.set(key, brushColor);
         }
+
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1.0;
     };
 
     const getAnnotationData = () => {
@@ -67,57 +109,16 @@ export const AnnotationEditor: React.FC<{
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        const annotationMask: number[][] = [];
-        const colorToClass: Record<string, number> = {
-            "#ff0000": 1,
-            "#00ff00": 2,
-        };
-
+        const annotationMask = [];
         for (let y = 0; y < canvas.height; y++) {
-            const row: number[] = [];
+            const row = [];
             for (let x = 0; x < canvas.width; x++) {
-                const idx = (y * canvas.width + x) * 4;
-                const r = imageData.data[idx];
-                const g = imageData.data[idx + 1];
-                const b = imageData.data[idx + 2];
-                const a = imageData.data[idx + 3];
-
-                let label = 0;
-                if (a > 0) {
-                    const hex = rgbToHex(r, g, b);
-                    label = colorToClass[hex.toLowerCase()] ?? 0;
-                }
-
-                row.push(label);
+                const index = (y * canvas.width + x) * 4;
+                const alpha = imageData.data[index + 3];
+                row.push(alpha > 0 ? 1 : 0);
             }
             annotationMask.push(row);
         }
-
-        const outputCanvas = document.createElement("canvas");
-        outputCanvas.width = canvas.width;
-        outputCanvas.height = canvas.height;
-        const outCtx = outputCanvas.getContext("2d");
-        const outputData = outCtx!.createImageData(canvas.width, canvas.height);
-
-        const classToColor: Record<number, [number, number, number]> = {
-            1: [255, 0, 0],
-            2: [0, 255, 0],
-        };
-
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                const label = annotationMask[y][x];
-                const [r, g, b] = classToColor[label] ?? [0, 0, 0];
-                const idx = (y * canvas.width + x) * 4;
-                outputData.data[idx] = r;
-                outputData.data[idx + 1] = g;
-                outputData.data[idx + 2] = b;
-                outputData.data[idx + 3] = label > 0 ? 255 : 0;
-            }
-        }
-
-        outCtx!.putImageData(outputData, 0, 0);
-        const layerBase64 = outputCanvas.toDataURL("image/png").split(",")[1];
 
         return {
             image_index: imageIndex,
@@ -126,15 +127,14 @@ export const AnnotationEditor: React.FC<{
                 position,
                 color,
                 brush_size: brushSize
-            })),
-            layer_base64: layerBase64
+            }))
         };
     };
 
     const handleSubmitAnnotation = () => {
         const annotationData = getAnnotationData();
         if (annotationData) {
-            onSubmitAnnotation(annotationData);
+            onSubmitAnnotation(imageIndex, annotationData);
         }
     };
 
@@ -144,29 +144,36 @@ export const AnnotationEditor: React.FC<{
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
+        const getMousePos = (e: MouseEvent) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY
+            };
+        };
+
         const handleMouseDown = (e: MouseEvent) => {
             drawing.current = true;
             setStrokes((prev) => [...prev, ctx.getImageData(0, 0, canvas.width, canvas.height)]);
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            draw(ctx, x, y);
+
+            const pos = getMousePos(e);
+            lastPosition.current = pos;
+            drawPoint(ctx, pos.x, pos.y);
         };
 
         const handleMouseMove = (e: MouseEvent) => {
-            if (!drawing.current) return;
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            draw(ctx, x, y);
+            if (!drawing.current || !lastPosition.current) return;
+
+            const currentPos = getMousePos(e);
+            drawLine(ctx, lastPosition.current.x, lastPosition.current.y, currentPos.x, currentPos.y);
+            lastPosition.current = currentPos;
         };
 
         const handleMouseUp = () => {
             drawing.current = false;
+            lastPosition.current = null;
         };
 
         canvas.addEventListener("mousedown", handleMouseDown);
@@ -190,7 +197,9 @@ export const AnnotationEditor: React.FC<{
         const last = strokes[strokes.length - 1];
         ctx.putImageData(last, 0, 0);
         setStrokes((prev) => prev.slice(0, -1));
-        brushedPixels.current.clear(); // optionally restore pixels
+
+        // Note: This simple undo doesn't restore the exact brushedPixels state
+        // For more accurate undo, you'd need to store the brushedPixels state as well
     };
 
     const handleReset = () => {
@@ -369,15 +378,3 @@ export const AnnotationEditor: React.FC<{
         </>
     );
 };
-
-function rgbToHex(r: number, g: number, b: number): string {
-    return (
-        "#" +
-        [r, g, b]
-            .map((x) => {
-                const hex = x.toString(16);
-                return hex.length === 1 ? "0" + hex : hex;
-            })
-            .join("")
-    );
-}
