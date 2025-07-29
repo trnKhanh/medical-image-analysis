@@ -14,8 +14,12 @@ api_router.include_router(models_router, prefix="/models")
 @api_router.post("/reset")
 def reset():
     """Reset the API."""
-    dataset_service.clear()
-    active_learning_service.clear()
+    try:
+        dataset_service.clear()
+        active_learning_service.clear()
+    except Exception as e:
+        print(f"Failed to reset API: {e}")
+        raise
     return {"message": "Dataset clear successfully"}
 
 

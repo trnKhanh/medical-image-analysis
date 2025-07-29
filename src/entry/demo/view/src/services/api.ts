@@ -124,9 +124,11 @@ class ApiService {
     submitAnnotation(annotation: any): Promise<{ message: string }> {
         const formData = new FormData();
         formData.append("image_index", annotation.image_index.toString());
-        formData.append("background", annotation.background);
-        formData.append("layers", JSON.stringify([annotation.layers]));
-
+        // formData.append("background", annotation.background);
+        // formData.append("layers", JSON.stringify(annotation.layers));
+        // Temporary test - use the same test image as background
+        formData.append("background", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
+        formData.append("layers", JSON.stringify(["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="]));
         return this.request({
             url: '/active-learning/annotate',
             method: 'POST',

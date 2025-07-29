@@ -127,6 +127,7 @@ const App: React.FC = () => {
                                     imageIndex={selectedImageIndex}
                                     onBrushColorChange={setBrushColor}
                                     onSubmitAnnotation={submitAnnotation}
+                                    onClose={cancelAnnotation}
                                 />
                             )}
                         </Modal>

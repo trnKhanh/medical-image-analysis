@@ -16,8 +16,21 @@ export interface ActiveLearningState {
 }
 
 export interface AnnotatedSample {
+    id: string;
+    case_name?: string;
+    index: number;
+    original_path: string;
     path: string;
+    background_image?: string;
     visual: string;
+    classes_found?: number[];
+    timestamp?: number;
+    dataset_structure?: {
+        images_folder: string;
+        labels_folder: string;
+        image_file: string;
+        label_file: string;
+    };
 }
 
 export interface PseudoLabel {

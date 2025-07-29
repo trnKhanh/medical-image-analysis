@@ -1,4 +1,6 @@
 import io
+import os
+import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -6,6 +8,7 @@ from pathlib import Path
 from fastapi import UploadFile, HTTPException
 from PIL import Image
 from starlette.responses import StreamingResponse
+from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
 
 from datasets import ActiveDataset
 from entry.demo.web.config import settings
@@ -212,10 +215,12 @@ class DatasetService:
                 image_path.unlink()
             for image_path in self.pool_images_dir.glob("*"):
                 image_path.unlink()
-            for image_path in self.annotations_dir.glob("*"):
-                image_path.unlink()
+            labels_dir = self.annotations_dir / "labels"
+            images_dir = self.annotations_dir / "images"
+            shutil.rmtree(labels_dir, ignore_errors=True)
+            shutil.rmtree(images_dir, ignore_errors=True)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to clear dataset: {str(e)}")
+            raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clear dataset: {str(e)}")
         else:
             return {"message": "Dataset cleared successfully"}
 
