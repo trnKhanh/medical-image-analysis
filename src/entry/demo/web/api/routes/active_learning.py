@@ -148,21 +148,11 @@ async def get_annotated_samples():
 
         serializable_samples = []
         for sample in annotated_set:
-            if isinstance(sample, dict):
-                visual_data = sample.get("visual")
-                if hasattr(visual_data, 'size'):  # PIL Image
-                    visual_base64 = image_to_base64(visual_data)
-                elif isinstance(visual_data, np.ndarray):
-                    visual_pil = Image.fromarray(visual_data)
-                    visual_base64 = image_to_base64(visual_pil)
-                elif isinstance(visual_data, str):
-                    visual_base64 = visual_data
-                else:
-                    visual_base64 = None
-
-                serializable_samples.append(visual_base64)
-            else:
-                serializable_samples.append(str(sample))
+            visual_data = sample.get("visual", None)
+            if visual_data is None:
+                continue
+            visual_base64 = image_to_base64(visual_data)
+            serializable_samples.append(visual_base64)
 
         return {"annotated_samples": serializable_samples}
 
@@ -211,7 +201,7 @@ async def annotate_image(
         if layer_base64 is None or layer_base64 == 'null' or str(layer_base64).strip() in ['null', '[null]', 'None']:
             raise HTTPException(
                 status_code=HTTP_400_BAD_REQUEST,
-                detail=f"Frontend sent null/invalid layer data. Received: '{layer_base64}'"
+                detail=f"Client sent null/invalid layer data. Received: '{layer_base64}'"
             )
 
         if not isinstance(layer_base64, str) or len(layer_base64) < 10:
