@@ -23,13 +23,43 @@ export const AnnotatedSamplesPanel: React.FC<{
         return new Date(timestamp * 1000).toLocaleString();
     };
 
+    // Helper function to get safe image source
+    const getSafeImageSrc = (sample: AnnotatedSample, type: 'background' | 'visual' = 'visual') => {
+        let imageData: string | undefined;
+
+        if (type === 'background') {
+            imageData = sample.background_image || sample.visual;
+        } else {
+            imageData = sample.visual;
+        }
+
+        // Check if imageData is valid
+        if (!imageData || imageData === 'undefined' || imageData === 'null' || imageData.trim() === '') {
+            console.warn(`Invalid image data for sample:`, sample);
+            return null;
+        }
+
+        return `data:image/png;base64,${imageData}`;
+    };
+
+    // Helper function to check if sample has valid visual data
+    const hasValidVisualData = (sample: AnnotatedSample) => {
+        return sample.visual &&
+            sample.visual !== 'undefined' &&
+            sample.visual !== 'null' &&
+            sample.visual.trim() !== '';
+    };
+
     const downloadSingleImage = (sample: AnnotatedSample, type: 'background' | 'visual') => {
-        const dataUrl = type === 'background'
-            ? `data:image/png;base64,${sample.background_image || sample.visual}` // Fallback to visual if no background_image
-            : `data:image/png;base64,${sample.visual}`;
+        const imageSrc = getSafeImageSrc(sample, type);
+
+        if (!imageSrc) {
+            message.error(`No ${type} image data available for this sample`);
+            return;
+        }
 
         const link = document.createElement('a');
-        link.href = dataUrl;
+        link.href = imageSrc;
         link.download = `${sample.case_name || `sample_${sample.index}`}_${type}.png`;
         document.body.appendChild(link);
         link.click();
@@ -37,15 +67,23 @@ export const AnnotatedSamplesPanel: React.FC<{
     };
 
     const handlePreview = (sample: AnnotatedSample) => {
+        const imageSrc = getSafeImageSrc(sample, 'visual');
+
+        if (!imageSrc) {
+            message.error('No image data available for preview');
+            return;
+        }
+
         Modal.info({
             title: `Annotation Preview - ${sample.case_name || `Sample ${sample.index}`}`,
             width: 800,
             content: (
                 <div>
                     <Image
-                        src={`data:image/png;base64,${sample.visual}`}
+                        src={imageSrc}
                         alt={`Annotation ${sample.case_name || sample.index}`}
                         style={{ width: '100%' }}
+                        fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN" // Placeholder image
                     />
                     <div style={{ marginTop: 16 }}>
                         <Space direction="vertical" size="small" style={{ width: '100%' }}>
@@ -91,6 +129,9 @@ export const AnnotatedSamplesPanel: React.FC<{
         });
     };
 
+    // Filter out samples with invalid visual data
+    const validSamples = samples.filter(hasValidVisualData);
+
     return (
         <div className="bg-white rounded-lg shadow p-6">
             {/* Header */}
@@ -100,18 +141,28 @@ export const AnnotatedSamplesPanel: React.FC<{
                     <h2 className="text-lg font-semibold m-0">
                         Annotated Samples
                     </h2>
-                    {samples.length > 0 && (
+                    {validSamples.length > 0 && (
                         <Badge
-                            count={samples.length}
+                            count={validSamples.length}
                             style={{
                                 backgroundColor: '#52c41a'
                             }}
                         />
                     )}
+                    {samples.length > validSamples.length && (
+                        <Tooltip title={`${samples.length - validSamples.length} samples with invalid data hidden`}>
+                            <Badge
+                                count={samples.length - validSamples.length}
+                                style={{
+                                    backgroundColor: '#ff4d4f'
+                                }}
+                            />
+                        </Tooltip>
+                    )}
                 </div>
 
                 <Space>
-                    {samples.length > 0 && (
+                    {validSamples.length > 0 && (
                         <Tooltip title="Dataset structure: images/ and labels/ folders">
                             <Button
                                 icon={<FolderOpenOutlined />}
@@ -126,7 +177,7 @@ export const AnnotatedSamplesPanel: React.FC<{
                         type="primary"
                         icon={isDownloading ? <LoadingOutlined /> : <DownloadOutlined />}
                         loading={isDownloading}
-                        disabled={samples.length === 0}
+                        disabled={validSamples.length === 0}
                         onClick={onDownload}
                         className="!bg-green-500 !border-green-500 hover:!bg-green-500/80 hover:!border-green-500/80"
                     >
@@ -136,117 +187,143 @@ export const AnnotatedSamplesPanel: React.FC<{
             </div>
 
             {/* Content */}
-            {samples.length > 0 ? (
+            {validSamples.length > 0 ? (
                 <div className="max-h-96 overflow-y-auto pr-1">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {samples.map((sample, index) => (
-                            <div
-                                key={sample.id || sample.case_name || index}
-                                className="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow duration-200 group"
-                            >
-                                <div className="h-40 bg-gray-50 flex items-center justify-center overflow-hidden relative">
-                                    <Image
-                                        src={`data:image/png;base64,${sample.visual}`}
-                                        alt={`Annotated ${sample.case_name || index}`}
-                                        className="w-full h-full object-contain"
-                                        preview={false}
-                                    />
+                        {validSamples.map((sample, index) => {
+                            const imageSrc = getSafeImageSrc(sample, 'visual');
 
-                                    {/* Hover overlay with actions */}
-                                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                        <Space>
-                                            <Tooltip title="Preview">
-                                                <Button
-                                                    type="primary"
-                                                    icon={<EyeOutlined />}
-                                                    size="small"
-                                                    onClick={() => handlePreview(sample)}
-                                                />
-                                            </Tooltip>
-                                            <Tooltip title="Download Original">
-                                                <Button
-                                                    icon={<DownloadOutlined />}
-                                                    size="small"
-                                                    onClick={() => downloadSingleImage(sample, 'background')}
-                                                >
-                                                    IMG
-                                                </Button>
-                                            </Tooltip>
-                                            <Tooltip title="Download Visual">
-                                                <Button
-                                                    icon={<DownloadOutlined />}
-                                                    size="small"
-                                                    onClick={() => downloadSingleImage(sample, 'visual')}
-                                                >
-                                                    VIS
-                                                </Button>
-                                            </Tooltip>
-                                            {onDelete && (
-                                                <Tooltip title="Delete">
+                            return (
+                                <div
+                                    key={sample.id || sample.case_name || index}
+                                    className="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow duration-200 group"
+                                >
+                                    <div className="h-40 bg-gray-50 flex items-center justify-center overflow-hidden relative">
+                                        {imageSrc ? (
+                                            <Image
+                                                src={imageSrc}
+                                                alt={`Annotated ${sample.case_name || index}`}
+                                                className="w-full h-full object-contain"
+                                                preview={false}
+                                                fallback="/api/placeholder/150/150"
+                                                onError={(e) => {
+                                                    console.error('Image failed to load:', sample);
+                                                    e.currentTarget.style.display = 'none';
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="text-gray-400 text-center p-4">
+                                                <FileImage className="h-8 w-8 mx-auto mb-2" />
+                                                <span className="text-sm">No image data</span>
+                                            </div>
+                                        )}
+
+                                        {/* Hover overlay with actions */}
+                                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                            <Space>
+                                                <Tooltip title="Preview">
                                                     <Button
-                                                        danger
-                                                        icon={<DeleteOutlined />}
+                                                        type="primary"
+                                                        icon={<EyeOutlined />}
                                                         size="small"
-                                                        onClick={() => handleDelete(sample)}
+                                                        onClick={() => handlePreview(sample)}
+                                                        disabled={!imageSrc}
                                                     />
                                                 </Tooltip>
-                                            )}
-                                        </Space>
-                                    </div>
-                                </div>
-
-                                <div className="p-3">
-                                    <div className="mb-2">
-                                        <Tooltip title={sample.path}>
-                                            <span className="text-sm font-medium text-gray-800 block truncate">
-                                                {sample.case_name || sample.path?.split('/').pop() || `Sample ${sample.index}`}
-                                            </span>
-                                        </Tooltip>
-                                    </div>
-
-                                    {/* Classes */}
-                                    {sample.classes_found && sample.classes_found.length > 0 && (
-                                        <div className="mb-2">
-                                            <Space size={[4, 4]} wrap>
-                                                {sample.classes_found.map(classId => (
-                                                    <Tag
-                                                        key={classId}
-                                                        color={getClassColor(classId)}
+                                                <Tooltip title="Download Original">
+                                                    <Button
+                                                        icon={<DownloadOutlined />}
                                                         size="small"
+                                                        onClick={() => downloadSingleImage(sample, 'background')}
+                                                        disabled={!getSafeImageSrc(sample, 'background')}
                                                     >
-                                                        {classId}
-                                                    </Tag>
-                                                ))}
+                                                        IMG
+                                                    </Button>
+                                                </Tooltip>
+                                                <Tooltip title="Download Visual">
+                                                    <Button
+                                                        icon={<DownloadOutlined />}
+                                                        size="small"
+                                                        onClick={() => downloadSingleImage(sample, 'visual')}
+                                                        disabled={!imageSrc}
+                                                    >
+                                                        VIS
+                                                    </Button>
+                                                </Tooltip>
+                                                {onDelete && (
+                                                    <Tooltip title="Delete">
+                                                        <Button
+                                                            danger
+                                                            icon={<DeleteOutlined />}
+                                                            size="small"
+                                                            onClick={() => handleDelete(sample)}
+                                                        />
+                                                    </Tooltip>
+                                                )}
                                             </Space>
                                         </div>
-                                    )}
+                                    </div>
 
-                                    {/* Timestamp */}
-                                    {sample.timestamp && (
-                                        <div className="text-xs text-gray-400">
-                                            {formatTimestamp(sample.timestamp)}
+                                    <div className="p-3">
+                                        <div className="mb-2">
+                                            <Tooltip title={sample.path}>
+                                                <span className="text-sm font-medium text-gray-800 block truncate">
+                                                    {sample.case_name || sample.path?.split('/').pop() || `Sample ${sample.index}`}
+                                                </span>
+                                            </Tooltip>
                                         </div>
-                                    )}
 
-                                    {/* Dataset structure info */}
-                                    {sample.dataset_structure && (
-                                        <Tooltip title={`Saved to: ${sample.dataset_structure.images_folder}${sample.dataset_structure.image_file}`}>
-                                            <div className="text-xs text-blue-600 mt-1 truncate">
-                                                📁 {sample.dataset_structure.image_file}
+                                        {/* Classes */}
+                                        {sample.classes_found && sample.classes_found.length > 0 && (
+                                            <div className="mb-2">
+                                                <Space size={[4, 4]} wrap>
+                                                    {sample.classes_found.map(classId => (
+                                                        <Tag
+                                                            key={classId}
+                                                            color={getClassColor(classId)}
+                                                            size="small"
+                                                        >
+                                                            {classId}
+                                                        </Tag>
+                                                    ))}
+                                                </Space>
                                             </div>
-                                        </Tooltip>
-                                    )}
+                                        )}
+
+                                        {/* Timestamp */}
+                                        {sample.timestamp && (
+                                            <div className="text-xs text-gray-400">
+                                                {formatTimestamp(sample.timestamp)}
+                                            </div>
+                                        )}
+
+                                        {/* Dataset structure info */}
+                                        {sample.dataset_structure && (
+                                            <Tooltip title={`Saved to: ${sample.dataset_structure.images_folder}${sample.dataset_structure.image_file}`}>
+                                                <div className="text-xs text-blue-600 mt-1 truncate">
+                                                    📁 {sample.dataset_structure.image_file}
+                                                </div>
+                                            </Tooltip>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             ) : (
-                <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="No annotated samples yet"
-                    className="py-8"
-                />
+                <div>
+                    <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description="No valid annotated samples yet"
+                        className="py-8"
+                    />
+                    {samples.length > 0 && validSamples.length === 0 && (
+                        <div className="text-center text-red-500 text-sm mt-2">
+                            {samples.length} sample(s) found but all have invalid image data
+                        </div>
+                    )}
+                </div>
             )}
         </div>
     );

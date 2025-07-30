@@ -5,13 +5,12 @@ import type {
     PseudoLabel,
     ModelCheckpoint,
     LoadingState,
-    ActiveLearningState, SelectedSample
+    ActiveLearningState, SelectedSample, AnnotationData
 } from '../models';
 import { apiService } from '../services/api';
-import { createImageFromBackground, downloadFile } from '../commons/utils.ts';
+import { downloadFile } from '../commons/utils.ts';
 
 export const useApp = () => {
-    // State
     const [config, setConfig] = useState<Config>({
         budget: 10,
         model_ckpt: 'init_model.pth',
@@ -44,7 +43,6 @@ export const useApp = () => {
     const [brushColor, setBrushColor] = useState('#ff0000');
     const [maskData, setMaskData] = useState<number[][]>([]);
 
-    // Utility functions
     const showError = useCallback((message: string) => {
         setError(message);
         setTimeout(() => setError(''), 5000);
@@ -55,7 +53,6 @@ export const useApp = () => {
         setTimeout(() => setSuccess(''), 3000);
     }, []);
 
-    // API calls
     const loadStatus = useCallback(async () => {
         try {
             const data = await apiService.getStatus();
@@ -116,7 +113,6 @@ export const useApp = () => {
             await apiService.updateConfig(config);
             const result = await apiService.selectSamples();
             setSelectedSamples(result.selected_images);
-            console.log(result.selected_images);
             showSuccess('Sample selection completed');
             await loadStatus();
         } catch (err) {
@@ -125,13 +121,13 @@ export const useApp = () => {
         } finally {
             setLoading(prev => ({ ...prev, select: false }));
         }
-    }, [updateConfig, config, showError, showSuccess, loadStatus]);
+    }, [config, showSuccess, loadStatus, showError]);
 
     const loadPseudoLabel = useCallback(async (imageIndex: number) => {
         try {
             setLoading(prev => ({ ...prev, pseudo: true }));
-            const result = await apiService.getPseudoLabel(imageIndex);
-            console.log("PSEUDO LABEL:", result);
+            const imagePath = selectedSamples[imageIndex].path;
+            const result = await apiService.getPseudoLabel(imagePath);
             setPseudoLabel(result);
             const height = result.background.length;
             const width = result.background[0].length;
@@ -142,41 +138,27 @@ export const useApp = () => {
         } finally {
             setLoading(prev => ({ ...prev, pseudo: false }));
         }
-    }, [showError]);
+    }, [selectedSamples, showError]);
 
-    const submitAnnotation = useCallback(async (annotationData: any) => {
+    const submitAnnotation = useCallback(async (annotationData: AnnotationData) => {
         if (!pseudoLabel || selectedImageIndex === null) return;
 
         try {
             setLoading(prev => ({ ...prev, annotate: true }));
-
-            const backgroundBase64 = createImageFromBackground(pseudoLabel.background);
-
-            const annotation = {
-                image_index: selectedImageIndex,
-                layers: [annotationData.annotation_mask],
-                background: backgroundBase64
-            };
-
-            const response = await apiService.submitAnnotation(annotation);
+            console.log("ANNOTATION DATA", annotationData);
+            const response = await apiService.submitAnnotation(annotationData);
 
             showSuccess(response.message);
             await loadAnnotatedSamples();
             await loadStatus();
 
-            if (selectedImageIndex < selectedSamples.length - 1) {
-                setSelectedImageIndex(selectedImageIndex + 1);
-                await loadPseudoLabel(selectedImageIndex + 1);
-            } else {
-                setIsAnnotating(false);
-                setSelectedImageIndex(null);
-                setPseudoLabel(null);
-            }
         } catch (err) {
             showError('Failed to submit annotation');
             console.error(err);
+            cancelAnnotation();
         } finally {
             setLoading(prev => ({ ...prev, annotate: false }));
+            cancelAnnotation();
         }
     }, [
         pseudoLabel,
@@ -216,7 +198,6 @@ export const useApp = () => {
             setLoading(prev => ({ ...prev, reset: true }));
             await apiService.resetSystem();
 
-            // Reset local state
             setSelectedSamples([]);
             setAnnotatedSamples([]);
             setSelectedImageIndex(null);
@@ -226,7 +207,7 @@ export const useApp = () => {
             setPoolFiles(null);
 
             showSuccess('System reset successfully');
-            loadStatus();
+            await loadStatus();
         } catch (err) {
             showError('Failed to reset system');
             console.error(err)
@@ -243,15 +224,13 @@ export const useApp = () => {
         setSelectedImageIndex(index);
         setIsAnnotating(true);
         loadPseudoLabel(index);
-    }, [selectedSamples, loadPseudoLabel]);
+    }, [loadPseudoLabel]);
 
     const cancelAnnotation = () => {
         setIsAnnotating(false);
         setSelectedImageIndex(null);
-        setPseudoLabel(null);
     };
 
-    // Initialize data on mount
     useEffect(() => {
         loadStatus();
         loadConfig();

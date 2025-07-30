@@ -1,9 +1,14 @@
-import type { PseudoLabel } from "../../models";
-import React, { useRef, useEffect, useState } from "react";
-import { Button, Space, Typography, Tooltip, Tag, Spin, Divider, Slider } from "antd";
+import type {AnnotationData, PseudoLabel} from "../../models";
+import React, {useEffect, useRef, useState} from "react";
+import {Button, Divider, Slider, Space, Spin, Tag, Tooltip, Typography} from "antd";
 import {
-    CheckOutlined, BgColorsOutlined, LoadingOutlined,
-    UndoOutlined, DeleteOutlined, ZoomInOutlined, ZoomOutOutlined
+    BgColorsOutlined,
+    CheckOutlined,
+    DeleteOutlined,
+    LoadingOutlined,
+    UndoOutlined,
+    ZoomInOutlined,
+    ZoomOutOutlined
 } from "@ant-design/icons";
 
 const { Text } = Typography;
@@ -13,11 +18,11 @@ export const AnnotationEditor: React.FC<{
     selectedImageContent: string;
     brushColor: string;
     isSubmitting: boolean;
-    imageIndex: number;
+    imagePath: string;
     onBrushColorChange: (color: string) => void;
-    onSubmitAnnotation: (imageIndex: number, annotationData: any) => void;
+    onSubmitAnnotation: (annotationData: AnnotationData) => void;
     onClose?: () => void;
-}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imageIndex, onBrushColorChange, onSubmitAnnotation, onClose }) => {
+}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imagePath, onBrushColorChange, onSubmitAnnotation, onClose }) => {
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const backgroundCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -29,21 +34,18 @@ export const AnnotationEditor: React.FC<{
     const lastPosition = useRef<{ x: number; y: number } | null>(null);
     const [canvasResolution, setCanvasResolution] = useState({ width: 640, height: 320 });
 
-    // Create custom cursor based on brush type and size, accounting for canvas scaling and zoom
     const createCustomCursor = (isEraser: boolean, size: number) => {
         const canvas = document.createElement('canvas');
 
-        // Get the current overlay canvas and its display scaling
         const overlayCanvas = overlayCanvasRef.current;
         let displayScale = 1;
         if (overlayCanvas) {
             const rect = overlayCanvas.getBoundingClientRect();
-            displayScale = rect.width / overlayCanvas.width; // How much the canvas is scaled down for display
+            displayScale = rect.width / overlayCanvas.width;
         }
 
-        // Adjust cursor size based on display scaling and zoom, but inverse zoom for brush size
-        const effectiveBrushSize = size / zoom; // Smaller brush when zoomed in
-        const displaySize = effectiveBrushSize * displayScale * zoom; // But cursor shows actual visual size
+        const effectiveBrushSize = size / zoom;
+        const displaySize = effectiveBrushSize * displayScale * zoom;
         const cursorSize = Math.min(Math.max(displaySize * 2, 16), 64);
 
         canvas.width = cursorSize;
@@ -57,32 +59,26 @@ export const AnnotationEditor: React.FC<{
         const radius = Math.max(displaySize, 4);
 
         if (isEraser) {
-            // Draw eraser icon
             ctx.fillStyle = '#ffffff';
             ctx.strokeStyle = '#333333';
             ctx.lineWidth = 2;
 
-            // Eraser body (rectangle)
             const eraserWidth = radius * 1.5;
             const eraserHeight = radius * 0.8;
             ctx.fillRect(centerX - eraserWidth/2, centerY - eraserHeight/2, eraserWidth, eraserHeight);
             ctx.strokeRect(centerX - eraserWidth/2, centerY - eraserHeight/2, eraserWidth, eraserHeight);
 
-            // Eraser metal band
             ctx.fillStyle = '#cccccc';
             ctx.fillRect(centerX - eraserWidth/2, centerY - eraserHeight/4, eraserWidth, eraserHeight/2);
         } else {
-            // Draw brush icon
             ctx.fillStyle = 'rgba(51, 51, 51, 0.8)';
             ctx.strokeStyle = '#333333';
             ctx.lineWidth = 1;
 
-            // Brush handle
             const handleLength = radius * 1.2;
             const handleWidth = radius * 0.3;
             ctx.fillRect(centerX - handleWidth/2, centerY + radius/2, handleWidth, handleLength);
 
-            // Brush tip (circle)
             ctx.beginPath();
             ctx.arc(centerX, centerY, radius/2, 0, 2 * Math.PI);
             ctx.fill();
@@ -93,7 +89,6 @@ export const AnnotationEditor: React.FC<{
         return `url(${dataURL}) ${centerX} ${centerY}, crosshair`;
     };
 
-    // Update cursor style based on current brush and position
     const updateCanvasCursor = () => {
         const overlayCanvas = overlayCanvasRef.current;
         if (!overlayCanvas) return;
@@ -104,7 +99,6 @@ export const AnnotationEditor: React.FC<{
 
         overlayCanvas.style.cursor = customCursor;
 
-        // Add mouse move listener to change cursor when outside bounds
         const handleMouseMove = (e: MouseEvent) => {
             const rect = overlayCanvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -118,19 +112,15 @@ export const AnnotationEditor: React.FC<{
 
         overlayCanvas.addEventListener('mousemove', handleMouseMove);
 
-        // Cleanup function
         return () => {
             overlayCanvas.removeEventListener('mousemove', handleMouseMove);
         };
     };
 
-    // Update cursor when brush color or size changes
     useEffect(() => {
-        const cleanup = updateCanvasCursor();
-        return cleanup;
-    }, [brushColor, brushSize, zoom]);
+        return updateCanvasCursor();
+    }, [brushColor, brushSize, updateCanvasCursor, zoom]);
 
-    // Initialize background and overlay canvases when image loads
     useEffect(() => {
         if (selectedImageContent && backgroundCanvasRef.current) {
             const backgroundCanvas = backgroundCanvasRef.current;
@@ -142,13 +132,11 @@ export const AnnotationEditor: React.FC<{
                 console.log('DEBUG: Loading background image to canvas');
                 console.log('DEBUG: Original image dimensions:', img.width, 'x', img.height);
 
-                // Calculate display dimensions based on container size (320px height)
                 const containerHeight = 320;
-                const containerWidth = containerHeight * (img.width / img.height); // Maintain aspect ratio
+                const containerWidth = containerHeight * (img.width / img.height);
 
-                // Set canvas dimensions to match the actual display size
                 const displayWidth = Math.min(containerWidth, window.innerWidth * 0.8); // Max 80% of screen width
-                const displayHeight = displayWidth * (img.height / img.width); // Maintain aspect ratio
+                const displayHeight = displayWidth * (img.height / img.width);
 
                 const resolution = {
                     width: Math.round(displayWidth),
@@ -160,24 +148,19 @@ export const AnnotationEditor: React.FC<{
                 backgroundCanvas.width = resolution.width;
                 backgroundCanvas.height = resolution.height;
 
-                // Draw image to fill the canvas exactly
                 backgroundCtx.drawImage(img, 0, 0, resolution.width, resolution.height);
 
-                // Initialize overlay canvas with exact same dimensions as background
                 if (overlayCanvasRef.current) {
                     const overlayCanvas = overlayCanvasRef.current;
                     overlayCanvas.width = resolution.width;
                     overlayCanvas.height = resolution.height;
 
-                    // Clear overlay canvas
                     const overlayCtx = overlayCanvas.getContext("2d");
                     if (overlayCtx) {
                         overlayCtx.clearRect(0, 0, resolution.width, resolution.height);
                     }
                 }
 
-                console.log('DEBUG: Canvas set to display resolution:', resolution);
-                console.log('DEBUG: Canvas will fill container exactly with no scaling');
                 updateCanvasCursor();
             };
             img.onerror = (error) => {
@@ -187,36 +170,28 @@ export const AnnotationEditor: React.FC<{
         }
     }, [selectedImageContent]);
 
-    // Initialize overlay canvas with existing pseudo label layers
     useEffect(() => {
         if (pseudoLabel.layers && overlayCanvasRef.current && canvasResolution.width > 0) {
             const overlayCanvas = overlayCanvasRef.current;
             const overlayCtx = overlayCanvas.getContext("2d");
             if (!overlayCtx) return;
 
-            // Clear the overlay canvas
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-            // Draw existing pseudo label layers at exact canvas resolution
-            pseudoLabel.layers.forEach((layerData, index) => {
+            pseudoLabel.layers.forEach((layerData) => {
                 if (typeof layerData === 'string') {
-                    // Handle base64 image layers - draw at native resolution
                     const img = new Image();
                     img.onload = () => {
-                        // Draw the layer image at its native size to match canvas exactly
                         overlayCtx.drawImage(img, 0, 0, overlayCanvas.width, overlayCanvas.height);
                     };
                     img.src = `data:image/png;base64,${layerData}`;
                 } else {
-                    // Handle array-based layers - scale to exact canvas dimensions
                     const layerArr = layerData as any[][];
                     const h = layerArr.length;
                     const w = layerArr[0]?.length || 0;
 
-                    // Create ImageData at exact canvas resolution
                     const imgData = overlayCtx.createImageData(overlayCanvas.width, overlayCanvas.height);
 
-                    // Scale the layer data to match exact canvas resolution
                     for (let y = 0; y < overlayCanvas.height; y++) {
                         for (let x = 0; x < overlayCanvas.width; x++) {
                             const srcX = Math.floor((x / overlayCanvas.width) * w);
@@ -249,13 +224,10 @@ export const AnnotationEditor: React.FC<{
     }, [pseudoLabel.layers, canvasResolution]);
 
     const drawLine = (overlayCtx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) => {
-        const radius = brushSize / zoom;  // Adjust brush size based on zoom level
+        const radius = brushSize / zoom;
         const currentBrush = brushOptions.find(b => b.color === brushColor || b.hexColor === brushColor);
         const isErasing = currentBrush?.hexColor === "#ffffff";
 
-        console.log('DEBUG: Drawing line from', x1.toFixed(1), y1.toFixed(1), 'to', x2.toFixed(1), y2.toFixed(1), 'with radius', radius, 'zoom:', zoom);
-
-        // Only draw on overlay canvas to modify the mask
         overlayCtx.lineCap = "round";
         overlayCtx.lineJoin = "round";
         overlayCtx.lineWidth = radius * 2;
@@ -273,7 +245,6 @@ export const AnnotationEditor: React.FC<{
         overlayCtx.lineTo(x2, y2);
         overlayCtx.stroke();
 
-        // Track brushed pixels for the final annotation
         const distance = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
         const steps = Math.max(1, Math.ceil(distance));
 
@@ -294,16 +265,13 @@ export const AnnotationEditor: React.FC<{
     };
 
     const drawPoint = (overlayCtx: CanvasRenderingContext2D, x: number, y: number) => {
-        const radius = brushSize / zoom;  // Adjust brush size based on zoom level
+        const radius = brushSize / zoom;
         const currentBrush = brushOptions.find(b => b.color === brushColor || b.hexColor === brushColor);
         const isErasing = currentBrush?.hexColor === "#ffffff";
         const roundedX = Math.round(x);
         const roundedY = Math.round(y);
         const key = `${roundedX}_${roundedY}`;
 
-        console.log('DEBUG: Drawing point at', x.toFixed(1), y.toFixed(1), 'with radius', radius, 'zoom:', zoom);
-
-        // Only draw on overlay canvas to modify the mask
         if (isErasing) {
             overlayCtx.globalCompositeOperation = "destination-out";
             overlayCtx.fillStyle = "rgba(0,0,0,1)";
@@ -326,20 +294,14 @@ export const AnnotationEditor: React.FC<{
         overlayCtx.globalCompositeOperation = "source-over";
     };
 
-    // Convert canvas to base64 for backend
     const canvasToBase64 = (canvas: HTMLCanvasElement): string => {
         try {
-            console.log('DEBUG: Converting canvas to base64');
-            console.log('DEBUG: Canvas dimensions:', canvas.width, 'x', canvas.height);
 
-            // Check if canvas is valid
             if (!canvas || canvas.width === 0 || canvas.height === 0) {
                 throw new Error('Invalid canvas dimensions');
             }
 
-            // Use PNG format to preserve transparency
             const dataURL = canvas.toDataURL('image/png', 1.0);
-            console.log('DEBUG: DataURL generated, length:', dataURL.length);
 
             if (!dataURL || dataURL === 'data:,') {
                 throw new Error('Failed to generate dataURL from canvas');
@@ -371,11 +333,8 @@ export const AnnotationEditor: React.FC<{
         }
     };
 
-    // Remove the separate createAnnotationLayer function since we now use overlay canvas directly
-    // and the createFallbackLayer function since it's no longer needed
-
-    const getAnnotationData = () => {
-        console.log('DEBUG: Starting getAnnotationData');
+    const getAnnotationDataForSubmit = () => {
+        console.log('DEBUG: Starting getAnnotationDataForSubmit');
 
         const backgroundCanvas = backgroundCanvasRef.current;
         const overlayCanvas = overlayCanvasRef.current;
@@ -390,45 +349,28 @@ export const AnnotationEditor: React.FC<{
             return null;
         }
 
-        console.log('DEBUG: Background canvas dimensions:', backgroundCanvas.width, 'x', backgroundCanvas.height);
-        console.log('DEBUG: Overlay canvas dimensions:', overlayCanvas.width, 'x', overlayCanvas.height);
-
-        // Get background image as base64
         let backgroundBase64;
         try {
-            console.log('DEBUG: Converting background canvas to base64');
             backgroundBase64 = canvasToBase64(backgroundCanvas);
-            console.log('DEBUG: Background base64 length:', backgroundBase64.length);
         } catch (error) {
             console.error('DEBUG: Failed to get background base64:', error);
             return null;
         }
 
-        // Get overlay mask as base64
         let overlayMaskBase64;
         try {
-            console.log('DEBUG: Converting overlay mask to base64');
             overlayMaskBase64 = canvasToBase64(overlayCanvas);
-            console.log('DEBUG: Overlay mask base64 length:', overlayMaskBase64.length);
         } catch (error) {
             console.error('DEBUG: Failed to get overlay mask base64:', error);
             return null;
         }
 
         const result = {
-            image_index: imageIndex,
-            background: backgroundBase64,        // Original image
-            layers: [overlayMaskBase64]         // Edited overlay mask
+            image_path: imagePath,
+            background: backgroundBase64,
+            layers: [overlayMaskBase64]
         };
 
-        console.log('DEBUG: Final annotation data structure:', {
-            image_index: result.image_index,
-            background_length: result.background.length,
-            layers_count: result.layers.length,
-            first_layer_length: result.layers[0] ? result.layers[0].length : 'null'
-        });
-
-        // Final validation
         if (!result.background || !result.layers[0]) {
             console.error('DEBUG: CRITICAL - Missing background or layer data!');
             return null;
@@ -437,34 +379,20 @@ export const AnnotationEditor: React.FC<{
         return result;
     };
 
-    // Remove the createFallbackLayer function since we now handle overlay canvas directly
+    const handleSubmitAnnotation = async () => {
 
-    const handleSubmitAnnotation = () => {
-        console.log('DEBUG: Starting annotation submission');
-        console.log('DEBUG: Current canvas state:');
-        console.log('  - Background canvas available:', !!backgroundCanvasRef.current);
-        console.log('  - Overlay canvas available:', !!overlayCanvasRef.current);
-        console.log('  - Canvas resolution:', canvasResolution);
-
-        const annotationData = getAnnotationData();
+        const annotationData = getAnnotationDataForSubmit();
         if (annotationData) {
-            console.log('DEBUG: Annotation data prepared successfully');
-            console.log('DEBUG: Submitting data with:');
-            console.log('  - Image index:', annotationData.image_index);
-            console.log('  - Background image size:', annotationData.background.length, 'chars');
-            console.log('  - Overlay mask size:', annotationData.layers[0].length, 'chars');
-
-            // Submit the annotation data
-            onSubmitAnnotation(imageIndex, annotationData);
-
-            if (onClose) {
-                console.log('DEBUG: Closing modal after successful submission');
-                onClose();
+            try {
+                await onSubmitAnnotation(annotationData);
+            } catch (error) {
+                console.error('DEBUG: Submission failed:', error);
             }
         } else {
             console.error('DEBUG: Failed to prepare annotation data');
         }
     };
+
 
     useEffect(() => {
         const overlayCanvas = overlayCanvasRef.current;
@@ -474,26 +402,16 @@ export const AnnotationEditor: React.FC<{
         if (!overlayCtx) return;
 
         const getMousePos = (e: MouseEvent) => {
-            // Get the overlay canvas screen position and size
             const rect = overlayCanvas.getBoundingClientRect();
 
-            // Since canvas dimensions now match display size exactly,
-            // we can use simple 1:1 coordinate mapping
             const canvasX = e.clientX - rect.left;
             const canvasY = e.clientY - rect.top;
 
-            // Check if mouse is within canvas bounds
             const isInBounds = canvasX >= 0 && canvasX < overlayCanvas.width &&
                 canvasY >= 0 && canvasY < overlayCanvas.height;
 
-            // Clamp coordinates to canvas bounds
             const clampedX = Math.max(0, Math.min(canvasX, overlayCanvas.width - 1));
             const clampedY = Math.max(0, Math.min(canvasY, overlayCanvas.height - 1));
-
-            console.log('DEBUG: Simple coordinate mapping - Canvas pos:', clampedX.toFixed(1), clampedY.toFixed(1),
-                'Canvas size:', overlayCanvas.width, 'x', overlayCanvas.height,
-                'Display size:', rect.width.toFixed(0), 'x', rect.height.toFixed(0),
-                'In bounds:', isInBounds);
 
             return {
                 x: clampedX,
@@ -505,14 +423,12 @@ export const AnnotationEditor: React.FC<{
         const handleMouseDown = (e: MouseEvent) => {
             const pos = getMousePos(e);
 
-            // Only start drawing if mouse is within background image bounds
             if (!pos.isInBounds) {
                 console.log('DEBUG: Mouse click outside background bounds, ignoring');
                 return;
             }
 
             drawing.current = true;
-            // Save overlay state for undo
             setStrokes((prev) => [...prev, overlayCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height)]);
 
             lastPosition.current = { x: pos.x, y: pos.y };
@@ -552,7 +468,7 @@ export const AnnotationEditor: React.FC<{
             overlayCanvas.removeEventListener("mouseup", handleMouseUp);
             overlayCanvas.removeEventListener("mouseleave", handleMouseUp);
         };
-    }, [brushColor, brushSize, zoom]);
+    }, [brushColor, brushSize, drawLine, drawPoint, zoom]);
 
     const handleUndo = () => {
         const overlayCanvas = overlayCanvasRef.current;
@@ -581,7 +497,6 @@ export const AnnotationEditor: React.FC<{
                         };
                         img.src = `data:image/png;base64,${layerData}`;
                     } else {
-                        // Handle array-based layers
                         const layerArr = layerData as any[][];
                         const h = layerArr.length;
                         const w = layerArr[0]?.length || 0;
@@ -621,27 +536,21 @@ export const AnnotationEditor: React.FC<{
         brushedPixels.current.clear();
     };
 
-    const layerOverlays = React.useMemo(() => {
-        // We'll use the overlay canvas instead of creating separate layer overlays
-        // since the overlay canvas now contains the editable mask
-        return [];
-    }, [pseudoLabel.layers]);
-
     const brushOptions = [
         {
-            color: "rgba(255, 0, 0, 0.03)",      // Red with alpha 0.8 - matches mask alpha
+            color: "rgba(255, 0, 0, 0.03)",
             hexColor: "#ff0000",
             name: "Class 1 (Red)",
             bgColor: "#ff4d4f"
         },
         {
-            color: "rgba(1, 255, 0, 0.03)",      // Green with alpha 0.8 - matches mask alpha
+            color: "rgba(1, 255, 0, 0.03)",
             hexColor: "#00ff00",
             name: "Class 2 (Green)",
             bgColor: "#52c41a"
         },
         {
-            color: "rgba(255, 255, 255, 1.0)",  // White eraser - full opacity
+            color: "rgba(255, 255, 255, 1.0)",
             hexColor: "#ffffff",
             name: "Eraser",
             bgColor: "#fff",
@@ -723,7 +632,7 @@ export const AnnotationEditor: React.FC<{
                     border: "1px solid #e8e8e8",
                     transform: `scale(${zoom})`,
                     transformOrigin: "center center",
-                    margin: "0 auto" // Center the canvas container
+                    margin: "0 auto"
                 }}>
                     {pseudoLabel.background ? (
                         <>
@@ -737,7 +646,7 @@ export const AnnotationEditor: React.FC<{
                                     left: 0,
                                     width: "100%",
                                     height: "100%",
-                                    objectFit: "fill" // Fill exactly, no scaling issues
+                                    objectFit: "fill"
                                 }}
                             />
 

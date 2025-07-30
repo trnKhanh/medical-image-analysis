@@ -30,27 +30,16 @@ def base64_to_image(base64_string: str) -> Image.Image:
                 # Remove data URL prefix if present
                 base64_string = base64_string.split(',')[1]
 
-            # Clean the base64 string
             base64_string = base64_string.strip()
 
-            print(f"DEBUG: Base64 string length after cleaning: {len(base64_string)}")
-            print(f"DEBUG: Base64 first 50 chars: {base64_string[:50]}")
-            print(f"DEBUG: Base64 last 50 chars: {base64_string[-50:]}")
-
-            # Decode base64
             image_data = base64.b64decode(base64_string)
-            print(f"DEBUG: Decoded image data length: {len(image_data)}")
 
             # Check if we have actual image data
-            if len(image_data) < 10:  # Reduced minimum for testing small images
+            if len(image_data) < 10:
                 raise ValueError(f"Decoded data too small ({len(image_data)} bytes), probably not a valid image")
 
-            # Try to open the image
             byte_stream = BytesIO(image_data)
             image = Image.open(byte_stream)
-
-            # Verify the image was loaded
-            print(f"DEBUG: Image loaded successfully: {image.size}, {image.mode}")
 
             return image
         else:

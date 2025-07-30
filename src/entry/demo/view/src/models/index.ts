@@ -41,8 +41,8 @@ export interface PseudoLabel {
 
 export interface AnnotationData {
     image_path: string;
-    mask_data: number[][];
-    background_image: string;
+    layers: string[];
+    background: string;
 }
 
 export interface ModelCheckpoint {

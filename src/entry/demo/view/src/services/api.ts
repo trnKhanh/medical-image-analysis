@@ -5,7 +5,7 @@ import type {
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
-    ActiveLearningState,
+    ActiveLearningState, AnnotationData,
 } from '../models';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -115,20 +115,21 @@ class ApiService {
         });
     }
 
-    getPseudoLabel(imageIndex: number): Promise<PseudoLabel> {
+    getPseudoLabel(imagePath: string): Promise<PseudoLabel> {
         return this.request<PseudoLabel>({
-            url: `/active-learning/pseudo-label/${encodeURIComponent(imageIndex)}`,
+            url: `/active-learning/pseudo-label`,
+            method: 'GET',
+            params: {
+                image_path: imagePath
+            }
         });
     }
 
-    submitAnnotation(annotation: any): Promise<{ message: string }> {
+    submitAnnotation(annotation: AnnotationData): Promise<{ message: string }> {
         const formData = new FormData();
-        formData.append("image_index", annotation.image_index.toString());
-        // formData.append("background", annotation.background);
-        // formData.append("layers", JSON.stringify(annotation.layers));
-        // Temporary test - use the same test image as background
-        formData.append("background", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
-        formData.append("layers", JSON.stringify(["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="]));
+        formData.append("image_path", annotation.image_path);
+        formData.append("background", annotation.background);
+        formData.append("layers", JSON.stringify(annotation.layers));
         return this.request({
             url: '/active-learning/annotate',
             method: 'POST',

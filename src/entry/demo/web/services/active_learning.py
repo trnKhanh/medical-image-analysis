@@ -27,8 +27,8 @@ class ActiveLearningService:
 
         self.current_train_set: List[str] = []
         self.current_pool_set: List[str] = []
-        self.annotated_set: List[str] = []
-        self.selected_images = []
+        self.annotated_set: List[Any] = []
+        self.selected_image = None
         self.selected_set = []
 
         self.foundation_model = FoundationModelManager()
@@ -70,7 +70,7 @@ class ActiveLearningService:
             annotated_count=len(self.annotated_set)
         )
 
-    def get_annotated_set(self) -> List[str]:
+    def get_annotated_set(self) -> List[Any]:
         return self.annotated_set
 
     def get_train_set(self) -> List[str]:
@@ -165,7 +165,9 @@ class ActiveLearningService:
         """Clear current session data."""
         self.current_train_set.clear()
         self.current_pool_set.clear()
-        self.selected_images.clear()
+        self.selected_image = None
+        self.selected_set.clear()
+        self.annotated_set.clear()
         self.feature_dict = None
 
 
