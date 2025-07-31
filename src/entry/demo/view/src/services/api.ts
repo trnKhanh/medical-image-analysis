@@ -5,7 +5,7 @@ import type {
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
-    ActiveLearningState, AnnotationData,
+    ActiveLearningState, AnnotationData, SelectedSample,
 } from '../models';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -110,7 +110,7 @@ class ApiService {
 
     selectSamples(): Promise<SelectionResponse> {
         return this.request<SelectionResponse>({
-            url: '/active-learning/select/samples',
+            url: '/active-learning/select-samples',
             method: 'POST',
         });
     }
@@ -141,6 +141,12 @@ class ApiService {
     getAnnotatedSamples(): Promise<{ annotated_samples: AnnotatedSample[] }> {
         return this.request({
             url: '/active-learning/annotated',
+        });
+    }
+
+    getSelectedSamples(): Promise<{ selected_samples: SelectedSample[] }> {
+        return this.request({
+            url: '/active-learning/selected-samples',
         });
     }
 

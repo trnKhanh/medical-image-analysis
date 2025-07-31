@@ -156,9 +156,15 @@ export const useApp = () => {
             showError('Failed to submit annotation');
             console.error(err);
             cancelAnnotation();
+            const result = await apiService.getSelectedSamples();
+            const newSelectedSamples = result.selected_samples;
+            setSelectedSamples(newSelectedSamples);
         } finally {
             setLoading(prev => ({ ...prev, annotate: false }));
             cancelAnnotation();
+            const result = await apiService.getSelectedSamples();
+            const newSelectedSamples = result.selected_samples;
+            setSelectedSamples(newSelectedSamples);
         }
     }, [
         pseudoLabel,
