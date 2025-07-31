@@ -3,6 +3,7 @@ import os
 import json
 from copy import deepcopy
 from logging import getLogger
+from pathlib import Path
 from typing import List, Union
 import torchvision.transforms.functional as F
 
@@ -17,6 +18,7 @@ from entry.demo.web.models.requests import (ActiveLearningConfigRequest,
 from entry.demo.web.models.responses import (ActiveLearningConfigResponse,
                                              ActiveSelectionResponse, ActiveLearningStateResponse)
 from entry.demo.web.services.active_learning import active_learning_service
+from entry.demo.web.services.dataset import dataset_service
 from utils import draw_mask
 from utils.images import class_color_map, hex_to_rgb, image_to_base64, base64_to_image
 
@@ -177,7 +179,7 @@ async def annotate_image(
     image_index = active_learning_service.selected_set.index(image_path)
     active_learning_service.selected_image = {
         "index": image_index,
-        "path": image_path,
+        "case_name": Path(image_path).stem,
     }
 
     try:
@@ -213,7 +215,7 @@ async def annotate_image(
         try:
             background_image = base64_to_image(background)
             background_pil = background_image.convert("RGB")
-            active_learning_service.selected_image["images"] = background_pil
+            active_learning_service.selected_image["image"] = background_pil
             print(f"DEBUG: Background image processed: {background_pil.size}, {background_pil.mode}")
         except Exception as e:
             raise HTTPException(status_code=HTTP_400_BAD_REQUEST,
@@ -249,7 +251,7 @@ async def annotate_image(
                 print(f"DEBUG: Error processing color {color_hex} for class {cl}: {e}")
                 continue
 
-        active_learning_service.selected_image["masks"] = mask_np
+        active_learning_service.selected_image["mask"] = mask_np
         print(f"DEBUG: Mask created with shape {mask_np.shape}, unique values: {np.unique(mask_np)}")
 
         try:
@@ -264,6 +266,7 @@ async def annotate_image(
         annotated_path = active_learning_service.selected_set[image_index]
         active_learning_service.selected_set = [x for x in active_learning_service.selected_set if x != annotated_path]
         active_learning_service.annotated_set.append(deepcopy(active_learning_service.selected_image))
+        dataset_service.save_annotated_image(active_learning_service.selected_image)
         active_learning_service.selected_image = None
 
         visual_base64 = image_to_base64(visual_image) if hasattr(visual_image, 'size') else image_to_base64(

@@ -8,9 +8,8 @@ from pathlib import Path
 from fastapi import UploadFile, HTTPException
 from PIL import Image
 from starlette.responses import StreamingResponse
-from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR
+from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_404_NOT_FOUND
 
-from datasets import ActiveDataset
 from entry.demo.web.config import settings
 from entry.demo.web.models.requests import (ImageUploadRequest)
 from entry.demo.web.models.responses import (DatasetExportResponse,
@@ -18,14 +17,45 @@ from entry.demo.web.models.responses import (DatasetExportResponse,
 from entry.demo.web.services.active_learning import active_learning_service
 
 
+async def create_streaming_response(export_response: DatasetExportResponse) -> StreamingResponse:
+    """Create a streaming response for large files."""
+    if not export_response.export_path.exists():
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Export file not found")
+
+    def file_generator():
+        with open(export_response.export_path, "rb") as f:
+            while chunk := f.read(8192):
+                yield chunk
+
+    return StreamingResponse(
+        file_generator(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=annotated_dataset_{export_response.sample_count}_samples.zip"
+        }
+    )
+
+
 class DatasetService:
     def __init__(self):
         self.data_dir = settings.DATA_DIR
         self.annotations_dir = self.data_dir / "annotations"
+        self.annotated_image_dir = self.annotations_dir / "images"
+        self.annotated_label_dir = self.annotations_dir / "labels"
         self.train_images_dir = self.data_dir / "train"
         self.pool_images_dir = self.data_dir / "pool"
 
         self._ensure_directories()
+
+    def save_annotated_image(self, annotated_image) -> None:
+        """Save an annotated image to the dataset."""
+        image_path = self.annotated_image_dir / f"{annotated_image['case_name']}.png"
+        label_path = self.annotated_label_dir / f"{annotated_image['case_name']}.png"
+        image_pil = annotated_image["image"]
+        label_pil = Image.fromarray(annotated_image["mask"])
+        image_pil.save(image_path)
+        label_pil.save(label_path)
+
 
     def _ensure_directories(self):
         """Ensure all necessary directories exist."""
@@ -33,6 +63,8 @@ class DatasetService:
         self.annotations_dir.mkdir(parents=True, exist_ok=True)
         self.train_images_dir.mkdir(parents=True, exist_ok=True)
         self.pool_images_dir.mkdir(parents=True, exist_ok=True)
+        self.annotated_image_dir.mkdir(parents=True, exist_ok=True)
+        self.annotated_label_dir.mkdir(parents=True, exist_ok=True)
 
     def validate_image_file(file: UploadFile) -> bool:
         """Validate if the uploaded file is an image"""
@@ -150,6 +182,7 @@ class DatasetService:
         if not annotated_count:
             raise HTTPException(status_code=404, detail="No annotated samples available")
         annotated_set = active_learning_service.get_annotated_set()
+        print(annotated_set)
 
         try:
             self.annotations_dir.mkdir(exist_ok=True, parents=True)
@@ -158,25 +191,15 @@ class DatasetService:
             images_dir.mkdir(exist_ok=True, parents=True)
             labels_dir.mkdir(exist_ok=True, parents=True)
 
-            zip_file = self.annotations_dir / f"dataset_{annotated_count}_samples.zip"
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            zip_file = self.annotations_dir / f"dataset_{annotated_count}_samples_{timestamp}.zip"
 
             with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as archive:
-                for sample in annotated_set:
-                    case_name = Path(sample["path"]).stem
-                    image_np = sample["image"]
-                    label_np = sample["mask"]
-
-                    image_pil = Image.fromarray(image_np)
-                    label_pil = Image.fromarray(label_np)
-
-                    image_path = images_dir / f"{case_name}.png"
-                    label_path = labels_dir / f"{case_name}.png"
-
-                    image_pil.save(image_path)
-                    label_pil.save(label_path)
-
-                    archive.write(image_path, arcname=f"images/{case_name}.png")
-                    archive.write(label_path, arcname=f"labels/{case_name}.png")
+                for root, dirs, files in os.walk(self.annotations_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, start=self.annotations_dir)
+                        archive.write(file_path, arcname)
 
             file_size = zip_file.stat().st_size if zip_file.exists() else None
 
@@ -188,25 +211,7 @@ class DatasetService:
             )
 
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
-
-    async def create_streaming_response(self, export_response: DatasetExportResponse) -> StreamingResponse:
-        """Create a streaming response for large files."""
-        if not export_response.export_path.exists():
-            raise HTTPException(status_code=404, detail="Export file not found")
-
-        def file_generator():
-            with open(export_response.export_path, "rb") as f:
-                while chunk := f.read(8192):
-                    yield chunk
-
-        return StreamingResponse(
-            file_generator(),
-            media_type="application/zip",
-            headers={
-                "Content-Disposition": f"attachment; filename=annotated_dataset_{export_response.sample_count}_samples.zip"
-            }
-        )
+            raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Export failed: {str(e)}")
 
     def clear(self):
         """Clear all images from the dataset."""

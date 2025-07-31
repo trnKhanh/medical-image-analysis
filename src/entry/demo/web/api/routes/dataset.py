@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from entry.demo.web.models.requests import (AnnotationRequest, ImageUploadRequest)
 from entry.demo.web.models.responses import (AnnotationResponse,
                                              ImageUploadResponse)
-from entry.demo.web.services.dataset import dataset_service
+from entry.demo.web.services.dataset import dataset_service, create_streaming_response
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ async def upload_images(
 async def create_dataset():
     """Create a dataset with train and pool splits."""
     result = await dataset_service.export_dataset()
-    return await dataset_service.create_streaming_response(result)
+    return await create_streaming_response(result)
 
 
 @router.post("/annotations", response_model=AnnotationResponse)

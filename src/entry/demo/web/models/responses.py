@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -85,7 +86,7 @@ class AnnotationResponse(BaseResponse):
 
 
 class DatasetExportResponse(BaseResponse):
-    export_path: str = Field(..., description="Path to exported dataset")
+    export_path: Path = Field(..., description="Path to exported dataset")
     file_size: int = Field(..., description="Export file size in bytes")
     sample_count: int = Field(..., description="Number of samples exported")
     export_format: str = Field(..., description="Export format")
