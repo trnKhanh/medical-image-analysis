@@ -4,11 +4,11 @@ import { DownloadOutlined, LoadingOutlined } from "@ant-design/icons";
 import { FileImage } from "lucide-react";
 
 export const AnnotatedSamplesPanel: React.FC<{
-    samples: string[]; // Array of base64 strings
+    samples: string[];
     isDownloading: boolean;
     onDownload: () => void;
     onDelete?: (sampleId: string) => void;
-}> = ({ samples, isDownloading, onDownload, onDelete }) => {
+}> = ({ samples, isDownloading, onDownload }) => {
 
     return (
         <div className="bg-white rounded-lg shadow p-6">

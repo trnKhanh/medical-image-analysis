@@ -5,7 +5,6 @@ from copy import deepcopy
 from logging import getLogger
 from pathlib import Path
 from typing import List, Union
-import torchvision.transforms.functional as F
 
 import numpy as np
 from PIL import Image
@@ -64,7 +63,27 @@ async def clear_session():
     active_learning_service.clear_session_data()
     return {"message": "Session data cleared successfully"}
 
-@router.post("/select/samples")
+
+@router.get("/selected-samples")
+async def get_selected_samples():
+    selected_images = []
+    for path in active_learning_service.selected_set:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode()
+                selected_images.append({
+                    "path": path,
+                    "name": os.path.basename(path),
+                    "data": image_data
+                })
+    return {
+        "message": "Get selected samples completed successfully",
+        "selected_images": selected_images,
+        "count": len(selected_images)
+    }
+
+
+@router.post("/select-samples")
 async def select_samples():
     train_set = active_learning_service.get_train_set()
     pool_set = active_learning_service.get_pool_set()
@@ -116,7 +135,7 @@ async def select_samples():
         return {
             "message": "Selection completed successfully",
             "selected_images": selected_images,
-            "count": len(active_learning_service.selected_set)
+            "count": len(selected_images)
         }
 
     except Exception as e:
@@ -264,7 +283,7 @@ async def annotate_image(
             active_learning_service.selected_image["visual"] = background_pil
 
         annotated_path = active_learning_service.selected_set[image_index]
-        active_learning_service.selected_set = [x for x in active_learning_service.selected_set if x != annotated_path]
+        active_learning_service.selected_set.remove(annotated_path)
         active_learning_service.annotated_set.append(deepcopy(active_learning_service.selected_image))
         dataset_service.save_annotated_image(active_learning_service.selected_image)
         active_learning_service.selected_image = None
