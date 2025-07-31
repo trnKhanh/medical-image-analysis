@@ -31,7 +31,7 @@ export const ActiveSelectionPanel: React.FC<ActiveSelectionPanelProps> = ({
                 <div className="flex items-center space-x-2">
                     <Brain className="h-5 w-5 text-purple-600" />
                     <h2 className="text-lg font-semibold">Active Selection</h2>
-                    {selectedSamples.length > 0 && (
+                    {selectedSamples && selectedSamples.length > 0 && (
                         <Badge
                             count={selectedSamples.length}
                             style={{ backgroundColor: '#722ed1' }}
@@ -53,7 +53,7 @@ export const ActiveSelectionPanel: React.FC<ActiveSelectionPanelProps> = ({
             </div>
 
             {/* Content */}
-            {selectedSamples.length > 0 ? (
+            {(selectedSamples && selectedSamples.length > 0) ? (
                 <div>
                     <div className="mb-4">
                         <span className="text-sm font-medium text-gray-700">

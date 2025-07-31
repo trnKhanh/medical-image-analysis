@@ -1,6 +1,6 @@
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Final
+from typing import Any, Dict, List, Optional, Final, Coroutine
 from logging import getLogger
 
 import torch
@@ -34,6 +34,21 @@ class ActiveLearningService:
         self.foundation_model = FoundationModelManager()
         self.specialist_model = SpecialistModelManager()
 
+    def update_feature_dict_keys(self, old_base_path, new_base_path):
+        if not self.feature_dict:
+            return
+        old_base = str(old_base_path)
+        new_base = str(new_base_path)
+        updated_dict = {}
+        for old_key, feature in self.feature_dict.items():
+            if old_key.startswith(old_base):
+                new_key = old_key.replace(old_base, new_base, 1)
+                updated_dict[new_key] = feature
+            else:
+                updated_dict[old_key] = feature
+
+        self.feature_dict = updated_dict
+
     async def get_feature_dict(self, batch_size, device, active_dataset: ActiveDataset):
         dataset = ConcatDataset([active_dataset.get_train_dataset(), active_dataset.get_pool_dataset()])
         dataloader = DataLoader(dataset, batch_size=batch_size)
@@ -41,10 +56,11 @@ class ActiveLearningService:
 
         feature_dict = {}
         if model is None:
-            print("model is none")
+            Logger.error("model is none")
             return feature_dict
         if preprocess is None:
-            print("preprocess is none")
+            Logger.error("preprocess is none")
+            return feature_dict
         for sampled_batch in dataloader:
             image_batch = sampled_batch["image"]
             image_list = []
@@ -59,6 +75,10 @@ class ActiveLearningService:
 
             for i in range(len(feature_batch)):
                 case_name = sampled_batch["case_name"][i]
+
+                print(f"Storing feature for key: '{case_name}'")
+                print(f"Key type: {type(case_name)}")
+
                 feature_dict[case_name] = feature_batch[i]
 
         return feature_dict
@@ -90,7 +110,7 @@ class ActiveLearningService:
             self.config.sharp_factor = config_request.sharp_factor
             self.config.loaded_feature_only = config_request.loaded_feature_only
             self.config.model_ckpt = config_request.model_ckpt
-
+            print("UPDATE", self.config.budget)
             self.feature_dict = None
 
             return ActiveLearningConfigResponse(
@@ -103,9 +123,9 @@ class ActiveLearningService:
                 message=f"Failed to update configuration: {str(e)}"
             )
 
-    async def get_config(self) -> ActiveLearningConfigResponse:
+    async def get_config(self) -> dict[str, str | Any]:
         """Get the current active learning configuration."""
-        config_dict = {
+        return {
             "budget": self.config.budget,
             "model": self.config.model,
             "device": str(self.config.device),
@@ -116,35 +136,34 @@ class ActiveLearningService:
             "model_ckpt": self.config.model_ckpt
         }
 
-        return ActiveLearningConfigResponse(
-            message="Configuration retrieved successfully",
-            config=config_dict
-        )
-
     async def active_select(self, train_set, pool_set, budget, model_ckpt, batch_size, device,
                       loaded_feature_weight, sharp_factor, loaded_feature_only):
-        train_dataset = ExtendableDataset(ImageDataset(train_set, image_channels=1, image_size=settings.IMAGE_SIZE))
-        pool_dataset = ExtendableDataset(ImageDataset(pool_set, image_channels=1, image_size=settings.IMAGE_SIZE))
+        try:
+            train_dataset = ExtendableDataset(ImageDataset(train_set, image_channels=1, image_size=settings.IMAGE_SIZE))
+            pool_dataset = ExtendableDataset(ImageDataset(pool_set, image_channels=1, image_size=settings.IMAGE_SIZE))
 
-        Logger.info(f"train_dataset: {len(train_dataset)}")
-        Logger.info(f"pool_dataset: {len(pool_dataset)}")
-        active_dataset = ActiveDataset(train_dataset, pool_dataset)
+            Logger.info(f"train_dataset: {len(train_dataset)}")
+            Logger.info(f"pool_dataset: {len(pool_dataset)}")
+            active_dataset = ActiveDataset(train_dataset, pool_dataset)
 
-        if self.feature_dict is None:
-            self.feature_dict = await self.get_feature_dict(batch_size, device, active_dataset)
+            if self.feature_dict is None:
+                self.feature_dict = await self.get_feature_dict(batch_size, device, active_dataset)
 
-        active_selector = KMeanSelector(
-            batch_size=4,
-            num_workers=1,
-            pin_memory=True,
-            metric="l2",
-            feature_dict=self.feature_dict,
-            loaded_feature_weight=loaded_feature_weight,
-            sharp_factor=sharp_factor,
-            loaded_feature_only=loaded_feature_only,
-        )
-        await self.specialist_model.load_model(str(settings.MODELS_DIR) + "/" + model_ckpt)
-        return active_selector.select_next_batch(active_dataset, budget, self.specialist_model.model, device)
+            active_selector = KMeanSelector(
+                batch_size=4,
+                num_workers=1,
+                pin_memory=True,
+                metric="l2",
+                feature_dict=self.feature_dict,
+                loaded_feature_weight=loaded_feature_weight,
+                sharp_factor=sharp_factor,
+                loaded_feature_only=loaded_feature_only,
+            )
+            await self.specialist_model.load_model(str(settings.MODELS_DIR) + "/" + model_ckpt)
+            return active_selector.select_next_batch(active_dataset, budget, self.specialist_model.model, device)
+        except Exception as e:
+            Logger.error(f"Failed to select batch: {str(e)}")
+            return None
 
     def predict_pseudo_label(self, image_pil):
         image = F.to_tensor(image_pil)
@@ -156,10 +175,6 @@ class ActiveLearningService:
             pseudo_label = pred.argmax(1)
         pseudo_label = self.specialist_model.processor.postprocess(pseudo_label, [H, W])
         return pseudo_label[0]
-
-    def reset_feature_cache(self):
-        """Reset the feature cache."""
-        self.feature_dict = None
 
     def clear(self):
         """Clear current session data."""

@@ -12,10 +12,8 @@ from fastapi import APIRouter, HTTPException, Form
 from fastapi.params import Query
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR, HTTP_404_NOT_FOUND
 
-from entry.demo.web.models.requests import (ActiveLearningConfigRequest,
-                                            ActiveSelectionRequest)
-from entry.demo.web.models.responses import (ActiveLearningConfigResponse,
-                                             ActiveSelectionResponse, ActiveLearningStateResponse)
+from entry.demo.web.models.requests import (ActiveLearningConfigRequest)
+from entry.demo.web.models.responses import (ActiveLearningConfigResponse, ActiveLearningStateResponse)
 from entry.demo.web.services.active_learning import active_learning_service
 from entry.demo.web.services.dataset import dataset_service
 from utils import draw_mask
@@ -26,48 +24,30 @@ Logger = getLogger(__name__)
 
 router = APIRouter()
 
-@router.post("/select", response_model=ActiveSelectionResponse)
-async def select_next_batch(request: ActiveSelectionRequest):
-    """Perform active selection to get the next batch of images for annotation."""
-    return await active_learning_service.select_next_batch_simple(request)
 
 @router.post("/config", response_model=ActiveLearningConfigResponse)
 async def update_config(config: ActiveLearningConfigRequest):
     """Update active learning configuration."""
     return await active_learning_service.update_config(config)
 
+
 @router.get("/state", response_model=ActiveLearningStateResponse)
 async def get_state():
     """Get the current active learning state."""
     return active_learning_service.get_state()
 
-@router.get("/config", response_model=ActiveLearningConfigResponse)
+
+@router.get("/config")
 async def get_config():
     """Get the current active learning configuration."""
     return await active_learning_service.get_config()
-
-@router.post("/reset-features")
-async def reset_feature_cache():
-    """Reset the feature cache."""
-    active_learning_service.reset_feature_cache()
-    return {"message": "Feature cache reset successfully"}
-
-@router.get("/session-data")
-async def get_session_data():
-    """Get current session data."""
-    return active_learning_service.get_current_session_data()
-
-@router.post("/clear-session")
-async def clear_session():
-    """Clear current session data."""
-    active_learning_service.clear_session_data()
-    return {"message": "Session data cleared successfully"}
 
 
 @router.get("/selected-samples")
 async def get_selected_samples():
     selected_images = []
-    for path in active_learning_service.selected_set:
+    selected_set = active_learning_service.selected_set
+    for path in selected_set:
         if os.path.exists(path):
             with open(path, "rb") as f:
                 image_data = base64.b64encode(f.read()).decode()
@@ -78,7 +58,7 @@ async def get_selected_samples():
                 })
     return {
         "message": "Get selected samples completed successfully",
-        "selected_images": selected_images,
+        "selected_samples": selected_images,
         "count": len(selected_images)
     }
 
@@ -96,8 +76,7 @@ async def select_samples():
     if not pool_set:
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="No pool set is available")
 
-    annotated_samples = [x["path"] for x in active_learning_service.get_annotated_set()]
-
+    annotated_samples = [str(x["path"]) for x in active_learning_service.get_annotated_set()]
     try:
         result = await active_learning_service.active_select(
             list(set(train_set + annotated_samples)),
@@ -143,22 +122,6 @@ async def select_samples():
         raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/selected")
-async def get_selected_samples():
-    selected_images = []
-    for path in active_learning_service.selected_set:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode()
-                selected_images.append({
-                    "path": path,
-                    "name": os.path.basename(path),
-                    "data": image_data
-                })
-
-    return {"selected_images": selected_images}
-
-
 @router.get("/annotated")
 async def get_annotated_samples():
     """
@@ -178,16 +141,16 @@ async def get_annotated_samples():
         return {"annotated_samples": serializable_samples}
 
     except Exception as e:
-        print(f"DEBUG: Error in get_annotated_samples: {e}")
+        Logger.error(f"Error in get_annotated_samples: {e}")
         raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                             detail=f"Error retrieving annotated samples: {str(e)}")
 
 
 @router.post("/annotate")
 async def annotate_image(
-        image_path: str = Form(...),
-        background: str = Form(...),
-        layers: Union[str, List[str]] = Form(...),
+    image_path: str = Form(...),
+    background: str = Form(...),
+    layers: Union[str, List[str]] = Form(...),
 ):
     """
     Annotate image endpoint
@@ -232,10 +195,8 @@ async def annotate_image(
             )
 
         try:
-            background_image = base64_to_image(background)
-            background_pil = background_image.convert("RGB")
-            active_learning_service.selected_image["image"] = background_pil
-            print(f"DEBUG: Background image processed: {background_pil.size}, {background_pil.mode}")
+            image_pil = base64_to_image(background).convert("RGB")
+            active_learning_service.selected_image["image"] = image_pil
         except Exception as e:
             raise HTTPException(status_code=HTTP_400_BAD_REQUEST,
                                 detail=f"Failed to process background image: {str(e)}")
@@ -243,13 +204,11 @@ async def annotate_image(
         try:
             layer_image = base64_to_image(layer_base64)
             layer_np = np.array(layer_image.convert("RGBA"))
-            print(f"DEBUG: Layer image processed: {layer_np.shape}, dtype: {layer_np.dtype}")
         except Exception as e:
             raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=f"Failed to process layer image: {str(e)}")
 
         binary_layer_np = np.zeros_like(layer_np)
         binary_layer_np[layer_np > 127] = 255
-        print(f"DEBUG: Binary layer created: {binary_layer_np.shape}")
 
         H, W, _ = layer_np.shape
         mask_np = np.zeros((H, W), dtype=np.uint8)
@@ -257,39 +216,31 @@ async def annotate_image(
         for cl, color_hex in class_color_map.items():
             try:
                 color_rgb = hex_to_rgb(color_hex)
-                print(f"DEBUG: Processing class {cl} with color {color_hex} -> {color_rgb}")
-
-                color_array = np.array(color_rgb, dtype=np.uint8)
-                bin_mask = np.all(binary_layer_np[:, :, :3] == color_array, axis=-1)
+                bin_mask = np.all(binary_layer_np[:, :, :3] == color_rgb, axis=-1)
                 mask_np[bin_mask] = cl
 
-                pixel_count = np.sum(bin_mask)
-                print(f"DEBUG: Class {cl} matched {pixel_count} pixels")
-
             except Exception as e:
-                print(f"DEBUG: Error processing color {color_hex} for class {cl}: {e}")
+                Logger.error(f"Error processing color {color_hex} for class {cl}: {e}")
                 continue
 
         active_learning_service.selected_image["mask"] = mask_np
-        print(f"DEBUG: Mask created with shape {mask_np.shape}, unique values: {np.unique(mask_np)}")
-
-        try:
-            visual_image = draw_mask(background_pil, mask_np)
-            active_learning_service.selected_image["visual"] = visual_image
-            print(
-                f"DEBUG: Visual image created: {visual_image.size if hasattr(visual_image, 'size') else type(visual_image)}")
-        except Exception as e:
-            print(f"DEBUG: Error creating visual: {e}")
-            active_learning_service.selected_image["visual"] = background_pil
+        visual_image = draw_mask(image_pil, mask_np)
+        active_learning_service.selected_image["visual"] = visual_image
 
         annotated_path = active_learning_service.selected_set[image_index]
+
+        # Remove annotated images
+        os.remove(annotated_path)
         active_learning_service.selected_set.remove(annotated_path)
+        active_learning_service.current_pool_set.remove(annotated_path)
+
+        new_path = dataset_service.save_annotated_image(active_learning_service.selected_image)
+        active_learning_service.selected_image["path"] = new_path
         active_learning_service.annotated_set.append(deepcopy(active_learning_service.selected_image))
-        dataset_service.save_annotated_image(active_learning_service.selected_image)
+        active_learning_service.update_feature_dict_keys(annotated_path, new_path)
         active_learning_service.selected_image = None
 
-        visual_base64 = image_to_base64(visual_image) if hasattr(visual_image, 'size') else image_to_base64(
-            background_pil)
+        visual_base64 = image_to_base64(visual_image)
 
         response_data = {
             "message": "Annotation accepted successfully",
@@ -298,21 +249,16 @@ async def annotate_image(
             "processed_classes": [int(x) for x in np.unique(mask_np) if x > 0],
             "visual_base64": visual_base64
         }
-
-        print(
-            f"DEBUG: Annotation completed successfully. Remaining samples: {len(active_learning_service.selected_set)}")
         return response_data
 
     except HTTPException:
         raise
     except json.JSONDecodeError as e:
-        print(f"DEBUG: JSON decode error: {e}")
+        Logger.error(f"JSON decode error: {e}")
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=f"Invalid JSON in layers data: {str(e)}")
     except Exception as e:
-        print(f"DEBUG: Unexpected error occurred during annotation: {e}")
-        print(f"DEBUG: Error type: {type(e)}")
         import traceback
-        print(f"DEBUG: Traceback: {traceback.format_exc()}")
+        Logger.debug(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Processing error: {str(e)}")
 
 

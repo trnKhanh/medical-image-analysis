@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Model settings
     DEFAULT_FOUNDATION_MODEL: str = "BiomedCLIP"
-    DEFAULT_SPECIALIST_MODEL: str = "./resources/models/init_model.pth"
+    DEFAULT_SPECIALIST_MODEL: str = "init_model.pth"
     IMAGE_SIZE: int = 256
     IMAGES_PER_ROW: int = 10
 

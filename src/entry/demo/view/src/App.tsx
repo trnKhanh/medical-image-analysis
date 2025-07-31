@@ -34,6 +34,7 @@ const App: React.FC = () => {
         setPoolFiles,
         setBrushColor,
         uploadFiles,
+        updateConfig,
         selectSamples,
         submitAnnotation,
         cancelAnnotation,
@@ -96,6 +97,7 @@ const App: React.FC = () => {
                             checkpoints={availableCheckpoints}
                             loadingCheckpoints={loadingCheckpoints}
                             onRefreshCheckpoints={loadAvailableCheckpoints}
+                            onUpdateConfig={updateConfig}
                         />
                     </div>
                 </div>

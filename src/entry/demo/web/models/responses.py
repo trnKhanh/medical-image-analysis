@@ -31,6 +31,7 @@ class ImageUploadResponse(BaseResponse):
     uploaded_images: Optional[List[ImageInfo]] = None
     failed_uploads: Optional[List[Dict[str, str]]] = None
 
+
 class DatasetInfo(BaseModel):
     name: str = Field(..., description="Dataset name")
     train_count: int = Field(..., description="Number of training images")
@@ -43,14 +44,7 @@ class DatasetResponse(BaseResponse):
     dataset_info: DatasetInfo = Field(..., description="Dataset information")
 
 
-class ActiveSelectionResponse(BaseResponse):
-    selected_images: List[str] = Field(..., description="Selected image paths for annotation")
-    selection_method: str = Field(..., description="Selection method used")
-    budget: int = Field(..., description="Budget used for selection")
-    total_pool_size: int = Field(..., description="Total pool size before selection")
-
-
-class   ModelCheckpointInfo(BaseModel):
+class ModelCheckpointInfo(BaseModel):
     name: str = Field(..., description="Model checkpoint name")
     size: int = Field(..., description="File size in bytes")
     description: Optional[str] = Field(None, description="Model description")
@@ -64,14 +58,6 @@ class ModelCheckpointResponse(BaseResponse):
 class ModelCheckpointListResponse(BaseResponse):
     models: List[ModelCheckpointInfo] = Field(..., description="List of available model checkpoints")
     total_count: int = Field(..., description="Total number of models")
-
-
-class PredictionResponse(BaseResponse):
-    image_path: str = Field(..., description="Path to the predicted image")
-    prediction_mask: str = Field(..., description="Base64 encoded prediction mask")
-    prediction_visual: str = Field(..., description="Base64 encoded visualization")
-    model_used: str = Field(..., description="Model checkpoint used for prediction")
-    confidence_scores: Optional[Dict[str, float]] = Field(None, description="Confidence scores by class")
 
 
 class AnnotationInfo(BaseModel):

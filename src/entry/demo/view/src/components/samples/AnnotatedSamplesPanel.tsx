@@ -2,9 +2,10 @@ import React from "react";
 import { Button, Empty, Image, Badge, Space } from "antd";
 import { DownloadOutlined, LoadingOutlined } from "@ant-design/icons";
 import { FileImage } from "lucide-react";
+import type {AnnotatedSample} from "../../models";
 
 export const AnnotatedSamplesPanel: React.FC<{
-    samples: string[];
+    samples: AnnotatedSample[];
     isDownloading: boolean;
     onDownload: () => void;
     onDelete?: (sampleId: string) => void;

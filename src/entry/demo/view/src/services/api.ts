@@ -53,7 +53,6 @@ class ApiService {
             ...rest
         } = cfg;
 
-        // Only add Content‑Type when we know we’re sending JSON (not FormData)
         const finalHeaders =
             data && !(data instanceof FormData)
                 ? { 'Content-Type': 'application/json', ...headers }

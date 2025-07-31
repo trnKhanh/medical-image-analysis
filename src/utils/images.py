@@ -27,14 +27,12 @@ def base64_to_image(base64_string: str) -> Image.Image:
         # Handle both cases: with and without data URL prefix
         if isinstance(base64_string, str):
             if base64_string.startswith('data:image'):
-                # Remove data URL prefix if present
                 base64_string = base64_string.split(',')[1]
 
             base64_string = base64_string.strip()
 
             image_data = base64.b64decode(base64_string)
 
-            # Check if we have actual image data
             if len(image_data) < 10:
                 raise ValueError(f"Decoded data too small ({len(image_data)} bytes), probably not a valid image")
 
@@ -45,11 +43,6 @@ def base64_to_image(base64_string: str) -> Image.Image:
         else:
             raise ValueError(f"Expected string, got {type(base64_string)}")
     except Exception as e:
-        print(f"DEBUG: Error in base64_to_image: {str(e)}")
-        print(f"DEBUG: Input type: {type(base64_string)}")
-        if isinstance(base64_string, str):
-            print(f"DEBUG: Input length: {len(base64_string)}")
-            print(f"DEBUG: Input starts with: {base64_string[:100]}")
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=f"Invalid image data: {str(e)}")
 
 
@@ -72,10 +65,7 @@ def image_to_base64(image) -> str:
         img_str = base64.b64encode(buffered.getvalue()).decode()
         return img_str
     except Exception as e:
-        print(f"DEBUG: Error in image_to_base64: {str(e)}")
-        print(f"DEBUG: Input type: {type(image)}")
-        if isinstance(image, np.ndarray):
-            print(f"DEBUG: Array shape: {image.shape}, dtype: {image.dtype}")
+        print(f"Error in image_to_base64: {str(e)}")
         raise e
 
 def hex_to_rgb(h) -> list:

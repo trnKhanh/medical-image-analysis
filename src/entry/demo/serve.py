@@ -38,7 +38,7 @@ class Config:
         self.loaded_feature_weight = 1
         self.sharp_factor = 1
         self.loaded_feature_only = False
-        self.model_ckpt = "resources/models/init_model.pth"
+        self.model_ckpt = "init_model.pth"
 
 
 config = Config()

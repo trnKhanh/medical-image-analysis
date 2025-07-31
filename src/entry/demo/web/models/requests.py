@@ -24,28 +24,14 @@ class ImageUploadRequest(BaseModel):
     type: str = Field(..., description="Image type (train/pool)")
     images: List[UploadFile] = Field(..., description="List of uploaded images")
 
-class DatasetRequest(BaseModel):
-    train_images: List[str] = Field(default=[], description="List of training image paths")
-    pool_images: List[str] = Field(default=[], description="List of pool image paths")
-
-class ActiveSelectionRequest(BaseModel):
-    train_set: List[str] = Field(..., description="Training set image paths")
-    pool_set: List[str] = Field(..., description="Pool set image paths")
-    config: ActiveLearningConfigRequest = Field(default_factory=ActiveLearningConfigRequest)
 
 class AnnotationRequest(BaseModel):
     image_path: str = Field(..., description="Path to the image being annotated")
     mask_data: str = Field(..., description="Base64 encoded mask data")
     case_name: Optional[str] = Field(None, description="Case name")
 
+
 class ModelCheckpointRequest(BaseModel):
     name: str = Field(..., description="Model checkpoint name")
     description: Optional[str] = Field(None, description="Model description")
     file_content: str = Field(..., description="Base64 encoded model file content")
-
-class PredictionRequest(BaseModel):
-    image_path: str = Field(..., description="Path to image for prediction")
-    model_ckpt: Optional[str] = Field(None, description="Specific model checkpoint to use")
-
-class DatasetExportRequest(BaseModel):
-    dataset_name: str = Field(..., description="Name for the exported dataset")

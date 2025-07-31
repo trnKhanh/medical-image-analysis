@@ -440,7 +440,6 @@ export const AnnotationEditor: React.FC<{
 
             const currentPos = getMousePos(e);
 
-            // Only continue drawing if mouse is within background image bounds
             if (!currentPos.isInBounds) {
                 console.log('DEBUG: Mouse moved outside background bounds, stopping draw');
                 drawing.current = false;

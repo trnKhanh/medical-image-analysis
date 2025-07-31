@@ -66,6 +66,7 @@ export const useApp = () => {
     const loadConfig = useCallback(async () => {
         try {
             const data = await apiService.getConfig();
+            console.log("GETTT", data);
             setConfig(data);
         } catch (err) {
             showError('Failed to load configuration');
@@ -87,9 +88,21 @@ export const useApp = () => {
         }
     }, [showError]);
 
-    const updateConfig = useCallback((newConfig: Partial<Config>) => {
-        setConfig(prev => ({ ...prev, ...newConfig }));
-    }, []);
+    const updateConfig = useCallback(async (newConfig: Config) => {
+        try {
+            setLoading(prev => ({ ...prev, config: true }));
+            await apiService.updateConfig(newConfig);
+            setConfig(newConfig);
+            showSuccess('Configuration updated successfully');
+            await loadStatus();
+        } catch (err) {
+            showError('Failed to update configuration');
+            console.error(err);
+            throw err;
+        } finally {
+            setLoading(prev => ({ ...prev, config: false }));
+        }
+    }, [showSuccess, showError, loadStatus]);
 
     const uploadFiles = useCallback(async (files: FileList, type: 'train' | 'pool') => {
         try {
@@ -110,7 +123,6 @@ export const useApp = () => {
     const selectSamples = useCallback(async () => {
         try {
             setLoading(prev => ({ ...prev, select: true }));
-            await apiService.updateConfig(config);
             const result = await apiService.selectSamples();
             setSelectedSamples(result.selected_images);
             showSuccess('Sample selection completed');
@@ -121,7 +133,7 @@ export const useApp = () => {
         } finally {
             setLoading(prev => ({ ...prev, select: false }));
         }
-    }, [config, showSuccess, loadStatus, showError]);
+    }, [showSuccess, loadStatus, showError]);
 
     const loadPseudoLabel = useCallback(async (imageIndex: number) => {
         try {
@@ -139,6 +151,16 @@ export const useApp = () => {
             setLoading(prev => ({ ...prev, pseudo: false }));
         }
     }, [selectedSamples, showError]);
+
+    const loadAnnotatedSamples = useCallback(async () => {
+        try {
+            const result = await apiService.getAnnotatedSamples();
+            setAnnotatedSamples(result.annotated_samples);
+        } catch (err) {
+            showError(`Failed to load annotated samples`);
+            console.error(err);
+        }
+    }, [showError]);
 
     const submitAnnotation = useCallback(async (annotationData: AnnotationData) => {
         if (!pseudoLabel || selectedImageIndex === null) return;
@@ -158,32 +180,17 @@ export const useApp = () => {
             cancelAnnotation();
             const result = await apiService.getSelectedSamples();
             const newSelectedSamples = result.selected_samples;
+            console.log("NEW SELECTED SAMPLES", newSelectedSamples);
             setSelectedSamples(newSelectedSamples);
         } finally {
             setLoading(prev => ({ ...prev, annotate: false }));
             cancelAnnotation();
             const result = await apiService.getSelectedSamples();
             const newSelectedSamples = result.selected_samples;
+            console.log("NEW SELECTED SAMPLES", newSelectedSamples);
             setSelectedSamples(newSelectedSamples);
         }
-    }, [
-        pseudoLabel,
-        selectedImageIndex,
-        selectedSamples,
-        showError,
-        showSuccess,
-        loadPseudoLabel
-    ]);
-
-    const loadAnnotatedSamples = useCallback(async () => {
-        try {
-            const result = await apiService.getAnnotatedSamples();
-            setAnnotatedSamples(result.annotated_samples);
-        } catch (err) {
-            showError(`Failed to load annotated samples`);
-            console.error(err);
-        }
-    }, [showError]);
+    }, [pseudoLabel, selectedImageIndex, showSuccess, loadAnnotatedSamples, loadStatus, showError]);
 
     const downloadDataset = useCallback(async () => {
         try {
@@ -223,13 +230,24 @@ export const useApp = () => {
     }, [showError, showSuccess, loadStatus]);
 
     const syncSystem = useCallback(async () => {
-        console.log('syncSystem');
-    }, []);
+        try {
+            setLoading(prev => ({ ...prev, sync: true }));
+            await loadConfig();
+            await loadStatus();
+            await loadAnnotatedSamples();
+            showSuccess('System reset successfully');
+        } catch (error) {
+            showError('Failed to load sync system');
+            console.error(error);
+        } finally {
+            setLoading(prev => ({ ...prev, sync: false }));
+        }
+    }, [showSuccess, loadConfig, loadStatus, loadAnnotatedSamples, showError]);
 
     const startAnnotation = useCallback((index: number) => {
         setSelectedImageIndex(index);
         setIsAnnotating(true);
-        loadPseudoLabel(index);
+        loadPseudoLabel(index).then();
     }, [loadPseudoLabel]);
 
     const cancelAnnotation = () => {
@@ -238,10 +256,10 @@ export const useApp = () => {
     };
 
     useEffect(() => {
-        loadStatus();
-        loadConfig();
-        loadAvailableCheckpoints();
-        loadAnnotatedSamples();
+        loadStatus().then();
+        loadConfig().then();
+        loadAvailableCheckpoints().then();
+        loadAnnotatedSamples().then();
     }, [loadStatus, loadConfig, loadAvailableCheckpoints, loadAnnotatedSamples]);
 
     return {

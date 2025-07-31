@@ -44,10 +44,11 @@ class DatasetService:
         self.annotated_label_dir = self.annotations_dir / "labels"
         self.train_images_dir = self.data_dir / "train"
         self.pool_images_dir = self.data_dir / "pool"
+        self.data_archive_dir = self.data_dir / "archives"
 
         self._ensure_directories()
 
-    def save_annotated_image(self, annotated_image) -> None:
+    def save_annotated_image(self, annotated_image) -> str:
         """Save an annotated image to the dataset."""
         image_path = self.annotated_image_dir / f"{annotated_image['case_name']}.png"
         label_path = self.annotated_label_dir / f"{annotated_image['case_name']}.png"
@@ -55,6 +56,7 @@ class DatasetService:
         label_pil = Image.fromarray(annotated_image["mask"])
         image_pil.save(image_path)
         label_pil.save(label_path)
+        return image_path
 
 
     def _ensure_directories(self):
@@ -65,6 +67,7 @@ class DatasetService:
         self.pool_images_dir.mkdir(parents=True, exist_ok=True)
         self.annotated_image_dir.mkdir(parents=True, exist_ok=True)
         self.annotated_label_dir.mkdir(parents=True, exist_ok=True)
+        self.data_archive_dir.mkdir(parents=True, exist_ok=True)
 
     def validate_image_file(file: UploadFile) -> bool:
         """Validate if the uploaded file is an image"""
@@ -182,7 +185,6 @@ class DatasetService:
         if not annotated_count:
             raise HTTPException(status_code=404, detail="No annotated samples available")
         annotated_set = active_learning_service.get_annotated_set()
-        print(annotated_set)
 
         try:
             self.annotations_dir.mkdir(exist_ok=True, parents=True)
@@ -192,7 +194,7 @@ class DatasetService:
             labels_dir.mkdir(exist_ok=True, parents=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            zip_file = self.annotations_dir / f"dataset_{annotated_count}_samples_{timestamp}.zip"
+            zip_file = self.data_archive_dir / f"dataset_{annotated_count}_samples_{timestamp}.zip"
 
             with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as archive:
                 for root, dirs, files in os.walk(self.annotations_dir):
@@ -224,6 +226,8 @@ class DatasetService:
             images_dir = self.annotations_dir / "images"
             shutil.rmtree(labels_dir, ignore_errors=True)
             shutil.rmtree(images_dir, ignore_errors=True)
+            for item in self.data_archive_dir.glob("*"):
+                item.unlink()
         except Exception as e:
             raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clear dataset: {str(e)}")
         else:
