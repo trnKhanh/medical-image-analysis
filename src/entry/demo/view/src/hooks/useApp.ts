@@ -123,6 +123,10 @@ export const useApp = () => {
     const selectSamples = useCallback(async () => {
         try {
             setLoading(prev => ({ ...prev, select: true }));
+            if (status.pool_count < config.budget) {
+                showError("Current pool size must greater than budget!");
+                return;
+            }
             const result = await apiService.selectSamples();
             setSelectedSamples(result.selected_images);
             showSuccess('Sample selection completed');
@@ -133,7 +137,7 @@ export const useApp = () => {
         } finally {
             setLoading(prev => ({ ...prev, select: false }));
         }
-    }, [showSuccess, loadStatus, showError]);
+    }, [status, config, showSuccess, loadStatus, showError]);
 
     const loadPseudoLabel = useCallback(async (imageIndex: number) => {
         try {

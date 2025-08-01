@@ -135,7 +135,7 @@ export const ConfigurationPanel = forwardRef<ConfigurationPanelRef, Configuratio
                         onClick={handleUpdateConfig}
                         size="small"
                     >
-                        {updating ? 'Updating...' : 'Update Config'}
+                        {updating ? '...' : ''}
                     </Button>
                 </Space>
             }
