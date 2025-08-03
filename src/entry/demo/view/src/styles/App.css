@@ -177,3 +177,8 @@
 .group:hover .group-hover\:opacity-100 {
     opacity: 1;
 }
+
+.ant-upload-wrapper .ant-upload-list {
+    max-height: 200px;
+    overflow-y: auto;
+}

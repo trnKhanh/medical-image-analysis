@@ -104,7 +104,15 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                             <Text strong style={{ display: 'block', marginBottom: 12 }}>
                                 Training Images
                             </Text>
-                            <Upload.Dragger {...trainUploadProps} style={{ height: '120px' }}>
+                            <Upload.Dragger
+                                {...trainUploadProps}
+                                style={{ height: '120px' }}
+                                itemRender={(originNode, file, fileList, actions) => (
+                                    <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                                        {originNode}
+                                    </div>
+                                )}
+                            >
                                 <p className="ant-upload-drag-icon">
                                     <InboxOutlined style={{ fontSize: 32, color: '#1890ff' }} />
                                 </p>
@@ -115,6 +123,8 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                                     Multiple image files supported
                                 </p>
                             </Upload.Dragger>
+
+
 
                             <Button className="!bg-blue-300 !border-blue-300 mt-3"
                                     type="primary"
@@ -137,17 +147,21 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                             <Text strong style={{ display: 'block', marginBottom: 12 }}>
                                 Pool Images
                             </Text>
-                            <Upload.Dragger {...poolUploadProps} style={{ height: '120px' }}>
-                                <p className="ant-upload-drag-icon">
-                                    <InboxOutlined style={{ fontSize: 32, color: '#52c41a' }} />
-                                </p>
-                                <p className="ant-upload-text" style={{ fontSize: 12 }}>
-                                    Click or drag pool images here
-                                </p>
-                                <p className="ant-upload-hint" style={{ fontSize: 11 }}>
-                                    Used for the image pool
-                                </p>
-                            </Upload.Dragger>
+                            <div>
+                                <Upload.Dragger {...poolUploadProps} style={{ height: '120px' }}>
+                                    <p className="ant-upload-drag-icon">
+                                        <InboxOutlined style={{ fontSize: 32, color: '#52c41a' }} />
+                                    </p>
+                                    <p className="ant-upload-text" style={{ fontSize: 12 }}>
+                                        Click or drag pool images here
+                                    </p>
+                                    <p className="ant-upload-hint" style={{ fontSize: 11 }}>
+                                        Used for the image pool
+                                    </p>
+                                </Upload.Dragger>
+
+                                <div className="upload-list-scrollable" />
+                            </div>
 
                             <ConfigProvider
                                 theme={{
