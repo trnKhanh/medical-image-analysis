@@ -41,7 +41,7 @@ def draw_mask(image, mask, opacity=0.2):
     for class_id in class_colors.keys():
         class_mask = mask == class_id
         visualized_image[class_mask] = opacity * class_colors[class_id] + (1 - opacity) * visualized_image[class_mask]
-        
+
     return visualized_image
 
 

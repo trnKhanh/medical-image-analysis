@@ -5,7 +5,7 @@ import type {
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
-    ActiveLearningState, AnnotationData, SelectedSample,
+    ActiveLearningState, AnnotationData, SelectedSample, DiskInfo,
 } from '../models';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -20,7 +20,6 @@ const apiClient: AxiosInstance = axios.create({
     headers: { Accept: 'application/json' },
 });
 
-/** Convert Axios errors to something easier to read (optional) */
 apiClient.interceptors.response.use(
     (res) => res,
     (err) => {
@@ -41,8 +40,49 @@ apiClient.interceptors.response.use(
     },
 );
 
+apiClient.interceptors.request.use(
+    (config) => {
+        const workspace = ApiService.getCurrentWorkspace();
+        if (workspace) {
+            config.headers['X-Workspace'] = workspace;
+        }
+        return config;
+    },
+    (error) => {
+        return Promise.reject(error);
+    }
+);
 
 class ApiService {
+    private static currentWorkspace: string | null = null;
+
+    /**
+     * Extract workspace from current URL path
+     * e.g., http://localhost:3333/abc -> "abc"
+     */
+    static getCurrentWorkspace(): string | null {
+        if (typeof window !== 'undefined') {
+            const path = window.location.pathname;
+            const segments = path.split('/').filter(Boolean);
+            return segments[0] || null;
+        }
+        return this.currentWorkspace;
+    }
+
+    /**
+     * Set workspace manually (useful for SSR or testing)
+     */
+    static setWorkspace(workspace: string): void {
+        this.currentWorkspace = workspace;
+    }
+
+    /**
+     * Clear the current workspace
+     */
+    static clearWorkspace(): void {
+        this.currentWorkspace = null;
+    }
+
     private async request<T = unknown>(
         cfg: AxiosRequestConfig,
     ): Promise<T> {
@@ -57,6 +97,11 @@ class ApiService {
             data && !(data instanceof FormData)
                 ? { 'Content-Type': 'application/json', ...headers }
                 : headers;
+
+        const workspace = ApiService.getCurrentWorkspace();
+        if (workspace && !finalHeaders['X-Workspace']) {
+            finalHeaders['X-Workspace'] = workspace;
+        }
 
         const response: AxiosResponse<T> = await apiClient.request<T>({
             method,
@@ -96,6 +141,13 @@ class ApiService {
         const fd = new FormData();
         Array.from(files).forEach((f) => fd.append('files', f));
         fd.append('type', type);
+
+        // Add workspace to form data
+        const workspace = ApiService.getCurrentWorkspace();
+        if (workspace) {
+            fd.append('workspace', workspace);
+        }
+
         return fd;
     }
 
@@ -129,13 +181,19 @@ class ApiService {
         formData.append("image_path", annotation.image_path);
         formData.append("background", annotation.background);
         formData.append("layers", JSON.stringify(annotation.layers));
+
+        // Add workspace to annotation
+        const workspace = ApiService.getCurrentWorkspace();
+        if (workspace) {
+            formData.append("workspace", workspace);
+        }
+
         return this.request({
             url: '/active-learning/annotate',
             method: 'POST',
             data: formData,
         });
     }
-
 
     getAnnotatedSamples(): Promise<{ annotated_samples: AnnotatedSample[] }> {
         return this.request({
@@ -150,8 +208,12 @@ class ApiService {
     }
 
     async downloadDataset(): Promise<Blob> {
+        const workspace = ApiService.getCurrentWorkspace();
+        const params = workspace ? { workspace } : {};
+
         const { data } = await apiClient.get<Blob>('/dataset/download', {
             responseType: 'blob',
+            params,
         });
         return data;
     }
@@ -161,6 +223,14 @@ class ApiService {
             url: '/reset',
             method: 'POST',
         });
+    }
+
+    setWorkspace(workspace: string): void {
+        ApiService.setWorkspace(workspace);
+    }
+
+    getDiskInfo(): Promise<DiskInfo> {
+        return this.request<DiskInfo>({ url: '/dataset/disk-info' });
     }
 }
 

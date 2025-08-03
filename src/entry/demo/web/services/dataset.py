@@ -1,20 +1,24 @@
 import io
 import os
 import shutil
+import threading
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Generator
 
-from fastapi import UploadFile, HTTPException
+from fastapi import HTTPException, UploadFile
 from PIL import Image
 from starlette.responses import StreamingResponse
-from starlette.status import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_404_NOT_FOUND
+from starlette.status import HTTP_404_NOT_FOUND, HTTP_500_INTERNAL_SERVER_ERROR
 
 from entry.demo.web.config import settings
-from entry.demo.web.models.requests import (ImageUploadRequest)
-from entry.demo.web.models.responses import (DatasetExportResponse,
-                                             ImageInfo, ImageUploadResponse)
+from entry.demo.web.models.requests import ImageUploadRequest
+from entry.demo.web.models.responses import (DatasetExportResponse, ImageInfo,
+                                             ImageUploadResponse)
 from entry.demo.web.services.active_learning import active_learning_service
+from entry.demo.web.services.context.dataset import DatasetContext
 
 
 async def create_streaming_response(export_response: DatasetExportResponse) -> StreamingResponse:
@@ -35,10 +39,11 @@ async def create_streaming_response(export_response: DatasetExportResponse) -> S
         }
     )
 
-
-class DatasetService:
-    def __init__(self):
-        self.data_dir = settings.DATA_DIR
+class DatasetState:
+    def __init__(self, workspace_id: str):
+        self.workspace_id = workspace_id
+        self.base_data_dir = settings.DATA_DIR
+        self.data_dir = self.base_data_dir / "workspaces" / workspace_id
         self.annotations_dir = self.data_dir / "annotations"
         self.annotated_image_dir = self.annotations_dir / "images"
         self.annotated_label_dir = self.annotations_dir / "labels"
@@ -48,27 +53,38 @@ class DatasetService:
 
         self._ensure_directories()
 
-    def save_annotated_image(self, annotated_image) -> str:
-        """Save an annotated image to the dataset."""
-        image_path = self.annotated_image_dir / f"{annotated_image['case_name']}.png"
-        label_path = self.annotated_label_dir / f"{annotated_image['case_name']}.png"
-        image_pil = annotated_image["image"]
-        label_pil = Image.fromarray(annotated_image["mask"])
-        image_pil.save(image_path)
-        label_pil.save(label_path)
-        return image_path
-
-
     def _ensure_directories(self):
         """Ensure all necessary directories exist."""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.annotations_dir.mkdir(parents=True, exist_ok=True)
-        self.train_images_dir.mkdir(parents=True, exist_ok=True)
-        self.pool_images_dir.mkdir(parents=True, exist_ok=True)
-        self.annotated_image_dir.mkdir(parents=True, exist_ok=True)
-        self.annotated_label_dir.mkdir(parents=True, exist_ok=True)
-        self.data_archive_dir.mkdir(parents=True, exist_ok=True)
+        directories = [
+            self.data_dir,
+            self.annotations_dir,
+            self.annotated_image_dir,
+            self.annotated_label_dir,
+            self.train_images_dir,
+            self.pool_images_dir,
+            self.data_archive_dir
+        ]
 
+        for directory in directories:
+            directory.mkdir(parents=True, exist_ok=True)
+
+
+class DatasetService:
+    """Main dataset service managing multiple workspace directories."""
+
+    def __init__(self):
+        self._workspace_dirs: Dict[str, DatasetState] = {}
+        self._lock = threading.RLock()
+
+    def _get_workspace_dirs(self, workspace_id: str) -> DatasetState:
+        """Get or create workspace directories."""
+        with self._lock:
+            if workspace_id not in self._workspace_dirs:
+                self._workspace_dirs[workspace_id] = DatasetState(workspace_id)
+                print(f"Created workspace directories for: {workspace_id}")
+            return self._workspace_dirs[workspace_id]
+
+    @staticmethod
     def validate_image_file(file: UploadFile) -> bool:
         """Validate if the uploaded file is an image"""
         if not file.content_type or not file.content_type.startswith('image/'):
@@ -80,8 +96,25 @@ class DatasetService:
 
         return False
 
-    async def upload_images(self, request: ImageUploadRequest) -> ImageUploadResponse:
-        """Upload multiple images to the dataset."""
+    def save_annotated_image(self, workspace_id: str, annotated_image) -> str:
+        """Save an annotated image to the workspace dataset."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
+        image_path = dirs.annotated_image_dir / f"{annotated_image['case_name']}.png"
+        label_path = dirs.annotated_label_dir / f"{annotated_image['case_name']}.png"
+
+        image_pil = annotated_image["image"]
+        label_pil = Image.fromarray(annotated_image["mask"])
+
+        image_pil.save(image_path)
+        label_pil.save(label_path)
+
+        return str(image_path)
+
+    async def upload_images(self, workspace_id: str, request: ImageUploadRequest) -> ImageUploadResponse:
+        """Upload multiple images to the workspace dataset."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
         try:
             successful_uploads = []
             failed_uploads = []
@@ -119,9 +152,9 @@ class DatasetService:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                     unique_filename = f"{case_name}_{timestamp}{file_extension}"
 
-                    data_dir = self.train_images_dir
+                    data_dir = dirs.train_images_dir
                     if request.type == "pool":
-                        data_dir = self.pool_images_dir
+                        data_dir = dirs.pool_images_dir
 
                     image_path = data_dir / unique_filename
 
@@ -129,9 +162,11 @@ class DatasetService:
                         f.write(image_content)
 
                     if request.type == "pool":
-                        active_learning_service.current_pool_set.append(str(image_path))
+                        pool_set = active_learning_service.get_pool_set(workspace_id)
+                        pool_set.append(str(image_path))
                     else:
-                        active_learning_service.current_train_set.append(str(image_path))
+                        train_set = active_learning_service.get_train_set(workspace_id)
+                        train_set.append(str(image_path))
 
                     image_info = ImageInfo(
                         filename=uploaded_file.filename,
@@ -156,51 +191,50 @@ class DatasetService:
             if successful_count == total_files:
                 return ImageUploadResponse(
                     success=True,
-                    message=f"All {successful_count} images uploaded successfully",
+                    message=f"All {successful_count} images uploaded successfully to workspace {workspace_id}",
                     uploaded_images=successful_uploads
                 )
             elif successful_count > 0:
                 return ImageUploadResponse(
                     success=True,
-                    message=f"{successful_count} of {total_files} images uploaded successfully",
+                    message=f"{successful_count} of {total_files} images uploaded successfully to workspace {workspace_id}",
                     uploaded_images=successful_uploads,
                     failed_uploads=failed_uploads
                 )
             else:
                 return ImageUploadResponse(
                     success=False,
-                    message="No images were uploaded successfully",
+                    message=f"No images were uploaded successfully to workspace {workspace_id}",
                     failed_uploads=failed_uploads
                 )
 
         except Exception as e:
             return ImageUploadResponse(
                 success=False,
-                message=f"Failed to upload images: {str(e)}"
+                message=f"Failed to upload images to workspace {workspace_id}: {str(e)}"
             )
 
-    async def export_dataset(self, use_memory: bool = False) -> DatasetExportResponse:
-        """Export dataset with annotations to a downloadable format."""
-        annotated_count = active_learning_service.get_state().annotated_count
-        if not annotated_count:
-            raise HTTPException(status_code=404, detail="No annotated samples available")
-        annotated_set = active_learning_service.get_annotated_set()
+    async def export_dataset(self, workspace_id: str, use_memory: bool = False) -> DatasetExportResponse:
+        """Export dataset with annotations to a downloadable format for specific workspace."""
+        dirs = self._get_workspace_dirs(workspace_id)
+        with active_learning_service.workspace(workspace_id) as ws:
+            annotated_count = ws.get_state().annotated_count
+            if not annotated_count:
+                raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"No annotated samples available in workspace {workspace_id}")
 
         try:
-            self.annotations_dir.mkdir(exist_ok=True, parents=True)
-            images_dir = self.annotations_dir / "images"
-            labels_dir = self.annotations_dir / "labels"
-            images_dir.mkdir(exist_ok=True, parents=True)
-            labels_dir.mkdir(exist_ok=True, parents=True)
+            dirs.annotations_dir.mkdir(exist_ok=True, parents=True)
+            dirs.annotated_image_dir.mkdir(exist_ok=True, parents=True)
+            dirs.annotated_label_dir.mkdir(exist_ok=True, parents=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            zip_file = self.data_archive_dir / f"dataset_{annotated_count}_samples_{timestamp}.zip"
+            zip_file = dirs.data_archive_dir / f"dataset_{workspace_id}_{annotated_count}_samples_{timestamp}.zip"
 
             with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as archive:
-                for root, dirs, files in os.walk(self.annotations_dir):
+                for root, dirs_list, files in os.walk(dirs.annotations_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, start=self.annotations_dir)
+                        arcname = os.path.relpath(file_path, start=dirs.annotations_dir)
                         archive.write(file_path, arcname)
 
             file_size = zip_file.stat().st_size if zip_file.exists() else None
@@ -213,26 +247,141 @@ class DatasetService:
             )
 
         except Exception as e:
-            raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Export failed: {str(e)}")
+            raise HTTPException(
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Export failed for workspace {workspace_id}: {str(e)}"
+            )
 
-    def clear(self):
-        """Clear all images from the dataset."""
+    def get_workspace_stats(self, workspace_id: str) -> dict:
+        """Get statistics for workspace."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
+        stats = {}
+        directory_mapping = {
+            'train_images': dirs.train_images_dir,
+            'pool_images': dirs.pool_images_dir,
+            'annotated_images': dirs.annotated_image_dir,
+            'annotated_labels': dirs.annotated_label_dir,
+            'archives': dirs.data_archive_dir
+        }
+
+        for name, dir_path in directory_mapping.items():
+            if dir_path.exists():
+                file_count = len([f for f in dir_path.iterdir() if f.is_file()])
+                stats[f'{name}_count'] = file_count
+            else:
+                stats[f'{name}_count'] = 0
+
+        return stats
+
+    def list_images(self, workspace_id: str, image_type: str = "all") -> dict:
+        """List images in workspace by type."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
+        result = {}
+
+        if image_type in ["all", "train"]:
+            train_images = [f.name for f in dirs.train_images_dir.glob("*") if f.is_file()]
+            result["train_images"] = train_images
+
+        if image_type in ["all", "pool"]:
+            pool_images = [f.name for f in dirs.pool_images_dir.glob("*") if f.is_file()]
+            result["pool_images"] = pool_images
+
+        if image_type in ["all", "annotated"]:
+            annotated_images = [f.name for f in dirs.annotated_image_dir.glob("*") if f.is_file()]
+            result["annotated_images"] = annotated_images
+
+        return result
+
+    def get_workspace_disk_state(self, workspace_id: str) -> dict:
+        """Get disk usage for workspace."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
+        if not dirs.data_dir.exists():
+            return {'total_size': 0, 'file_count': 0}
+
+        total_size = 0
+        file_count = 0
+
+        for file_path in dirs.data_dir.rglob('*'):
+            if file_path.is_file():
+                total_size += file_path.stat().st_size
+                file_count += 1
+
+        return {
+            'total_size': total_size,
+            'total_size_mb': round(total_size / (1024 * 1024), 2),
+            'file_count': file_count,
+            'max_size': (100 * 1024 * 1024),
+            'max_size_mb': 100,
+            'usage_percent': total_size / (100 * 1024 * 1024) if total_size < (100 * 1024 * 1024) else 100,
+        }
+
+    def clear(self, workspace_id: str):
+        """Clear all images from the workspace dataset."""
+        dirs = self._get_workspace_dirs(workspace_id)
+
         try:
-            for image_path in self.train_images_dir.glob("*"):
-                image_path.unlink()
-            for image_path in self.pool_images_dir.glob("*"):
-                image_path.unlink()
-            labels_dir = self.annotations_dir / "labels"
-            images_dir = self.annotations_dir / "images"
-            shutil.rmtree(labels_dir, ignore_errors=True)
-            shutil.rmtree(images_dir, ignore_errors=True)
-            for item in self.data_archive_dir.glob("*"):
-                item.unlink()
-        except Exception as e:
-            raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to clear dataset: {str(e)}")
-        else:
-            return {"message": "Dataset cleared successfully"}
+            for image_path in dirs.train_images_dir.glob("*"):
+                if image_path.is_file():
+                    image_path.unlink()
 
+            for image_path in dirs.pool_images_dir.glob("*"):
+                if image_path.is_file():
+                    image_path.unlink()
+
+            if dirs.annotated_label_dir.exists():
+                shutil.rmtree(dirs.annotated_label_dir, ignore_errors=True)
+            if dirs.annotated_image_dir.exists():
+                shutil.rmtree(dirs.annotated_image_dir, ignore_errors=True)
+
+            for item in dirs.data_archive_dir.glob("*"):
+                if item.is_file():
+                    item.unlink()
+
+            dirs._ensure_directories()
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to clear dataset for workspace {workspace_id}: {str(e)}"
+            )
+
+    def delete_workspace(self, workspace_id: str):
+        """Delete the entire workspace and its data."""
+        with self._lock:
+            if workspace_id in self._workspace_dirs:
+                dirs = self._workspace_dirs[workspace_id]
+
+                try:
+                    # Remove the entire workspace directory
+                    if dirs.data_dir.exists():
+                        shutil.rmtree(dirs.data_dir)
+                        print(f"Deleted workspace directory: {dirs.data_dir}")
+
+                    # Remove from cache
+                    del self._workspace_dirs[workspace_id]
+                    print(f"Deleted workspace: {workspace_id}")
+
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to delete workspace {workspace_id}: {str(e)}"
+                    )
+
+    def get_all_workspace_stats(self) -> Dict[str, dict]:
+        """Get stats for all workspaces."""
+        with self._lock:
+            stats = {}
+            for workspace_id in self._workspace_dirs.keys():
+                stats[workspace_id] = self.get_workspace_stats(workspace_id)
+            return stats
+
+    @contextmanager
+    def workspace(self, workspace_id: str) -> Generator['DatasetContext', None, None]:
+        """Context manager for workspace operations."""
+        yield DatasetContext(self, workspace_id)
 
 # Global service instance
 dataset_service = DatasetService()

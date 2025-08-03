@@ -1,33 +1,49 @@
 from typing import List
 
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from fastapi import APIRouter, File, Form, UploadFile
-from entry.demo.web.models.requests import (AnnotationRequest, ImageUploadRequest)
+from entry.demo.web.middleware.workspace import get_workspace
+from entry.demo.web.models.requests import (AnnotationRequest,
+                                            ImageUploadRequest)
 from entry.demo.web.models.responses import (AnnotationResponse,
                                              ImageUploadResponse)
-from entry.demo.web.services.dataset import dataset_service, create_streaming_response
+from entry.demo.web.services.dataset import (create_streaming_response,
+                                             dataset_service)
 
 router = APIRouter()
 
 
 @router.post("/upload/images", response_model=ImageUploadResponse)
 async def upload_images(
+    workspace_id: str = Depends(get_workspace),
     files: List[UploadFile] = File(...),
     type: str = Form(...)
 ):
     """Upload multiple images to the dataset."""
-    request = ImageUploadRequest(type=type, images=files)
-    return await dataset_service.upload_images(request)
+    with dataset_service.workspace(workspace_id) as ws:
+        request = ImageUploadRequest(type=type, images=files)
+        return await ws.upload_images(request)
 
 
 @router.get("/download")
-async def create_dataset():
+async def download_dataset(workspace_id: str = Depends(get_workspace)):
     """Create a dataset with train and pool splits."""
-    result = await dataset_service.export_dataset()
-    return await create_streaming_response(result)
+    with dataset_service.workspace(workspace_id) as ws:
+        result = await ws.export_dataset()
+        return await create_streaming_response(result)
 
 
 @router.post("/annotations", response_model=AnnotationResponse)
-async def save_annotation(request: AnnotationRequest):
+async def save_annotation(
+    request: AnnotationRequest,
+    workspace_id: str = Depends(get_workspace),
+):
     """Save an annotation for an image."""
-    return await dataset_service.save_annotation(request)
+    with dataset_service.workspace(workspace_id) as ws:
+        return await ws.save_annotation(request)
+
+@router.get("/disk-info")
+def get_disk_info(workspace_id: str = Depends(get_workspace)):
+    """Get disk usage information."""
+    with dataset_service.workspace(workspace_id) as ws:
+        return ws.get_workspace_disk_state()

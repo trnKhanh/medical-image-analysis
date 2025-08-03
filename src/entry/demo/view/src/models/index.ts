@@ -61,3 +61,12 @@ export interface SelectedSample {
 export interface AnnotatedSample {
     list_visual: string[];
 }
+
+export interface DiskInfo {
+    total_size: number;
+    total_size_mb: number;
+    file_count: number;
+    max_size: number;
+    max_size_mb?: number;
+    usage_percentage?: number;
+}

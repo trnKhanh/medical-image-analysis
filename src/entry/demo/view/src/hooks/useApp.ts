@@ -5,7 +5,7 @@ import type {
     PseudoLabel,
     ModelCheckpoint,
     LoadingState,
-    ActiveLearningState, SelectedSample, AnnotationData
+    ActiveLearningState, SelectedSample, AnnotationData, DiskInfo
 } from '../models';
 import { apiService } from '../services/api';
 import { downloadFile } from '../commons/utils.ts';
@@ -42,6 +42,9 @@ export const useApp = () => {
     const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
     const [brushColor, setBrushColor] = useState('#ff0000');
     const [maskData, setMaskData] = useState<number[][]>([]);
+
+    const [diskInfo, setDiskInfo] = useState<DiskInfo | null>(null);
+    const [loadingDiskInfo, setLoadingDiskInfo] = useState(false);
 
     const showError = useCallback((message: string) => {
         setError(message);
@@ -259,12 +262,31 @@ export const useApp = () => {
         setSelectedImageIndex(null);
     };
 
+    const loadDiskInfo = useCallback(async () => {
+        setLoadingDiskInfo(true);
+        try {
+            const info = await apiService.getDiskInfo();
+            setDiskInfo(info);
+        } catch (err) {
+            console.error('Failed to load disk info:', err);
+            setError('Failed to load storage information');
+        } finally {
+            setLoadingDiskInfo(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        const interval = setInterval(loadDiskInfo, 30000);
+        return () => clearInterval(interval);
+    }, [loadDiskInfo]);
+
     useEffect(() => {
         loadStatus().then();
         loadConfig().then();
         loadAvailableCheckpoints().then();
         loadAnnotatedSamples().then();
-    }, [loadStatus, loadConfig, loadAvailableCheckpoints, loadAnnotatedSamples]);
+        loadDiskInfo().then();
+    }, [loadStatus, loadConfig, loadAvailableCheckpoints, loadAnnotatedSamples, loadDiskInfo]);
 
     return {
         // State
@@ -284,6 +306,8 @@ export const useApp = () => {
         loadingCheckpoints,
         brushColor,
         maskData,
+        diskInfo,
+        loadingDiskInfo,
 
         // Actions
         setTrainFiles,
@@ -300,6 +324,7 @@ export const useApp = () => {
         cancelAnnotation,
         loadAvailableCheckpoints,
         showError,
-        showSuccess
+        showSuccess,
+        loadDiskInfo,
     };
 };

@@ -1,7 +1,7 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
