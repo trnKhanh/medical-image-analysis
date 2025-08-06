@@ -3,8 +3,6 @@ name: Deploy to EC2
 
 on:
   push:
-    branches: [ phuphan/demo-multi-user ]
-  pull_request:
     branches: [ deployment ]
 
 env:

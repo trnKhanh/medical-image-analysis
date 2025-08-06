@@ -35,12 +35,11 @@ demo_serve
 - Start a web application
 by Docker
 ```bash
-bash ./cmd/start_web.sh docker
+docker-compose up -d --build
 ```
-or server
-```bash
-bash ./cmd/start_web.sh server
-```
+or server (sysmted)
+
+TODO
 
 
 ## Results in FUGC 2025
