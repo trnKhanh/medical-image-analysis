@@ -77,3 +77,12 @@ def zip_folder(folder_path: str | Path, zip_filename: str = None) -> Path:
                 zipf.write(file_path, arcname)
 
     return zip_path
+
+def get_folder_size(path):
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if os.path.isfile(fp):
+                total_size += os.path.getsize(fp)
+    return total_size

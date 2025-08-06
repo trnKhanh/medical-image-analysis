@@ -25,7 +25,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ workspaceId }) => {
     const {
         // State
         config,
-        status,
+        datasetState,
         trainFiles,
         poolFiles,
         selectedSamples,
@@ -79,7 +79,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ workspaceId }) => {
 
         <div className="min-h-screen bg-gray-50">
             <Header
-                status={status}
+                status={datasetState}
                 onReset={resetSystem}
                 isResetting={loading.reset}
                 isSyncing={loading.sync}
@@ -169,7 +169,7 @@ export const WorkspaceApp: React.FC<WorkspaceAppProps> = ({ workspaceId }) => {
                     <div className="space-y-6">
                         <ActiveSelectionPanel
                             selectedSamples={selectedSamples}
-                            status={status}
+                            status={datasetState}
                             isSelecting={loading.select}
                             onSelectSamples={selectSamples}
                             onStartAnnotation={startAnnotation}

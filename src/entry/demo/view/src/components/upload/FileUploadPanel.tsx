@@ -107,7 +107,7 @@ export const FileUploadPanel: React.FC<FileUploadPanelProps> = ({
                             <Upload.Dragger
                                 {...trainUploadProps}
                                 style={{ height: '120px' }}
-                                itemRender={(originNode, file, fileList, actions) => (
+                                itemRender={(originNode) => (
                                     <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
                                         {originNode}
                                     </div>

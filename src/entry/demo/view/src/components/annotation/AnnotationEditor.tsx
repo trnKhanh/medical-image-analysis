@@ -21,8 +21,7 @@ export const AnnotationEditor: React.FC<{
     imagePath: string;
     onBrushColorChange: (color: string) => void;
     onSubmitAnnotation: (annotationData: AnnotationData) => void;
-    onClose?: () => void;
-}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imagePath, onBrushColorChange, onSubmitAnnotation, onClose }) => {
+}> = ({ pseudoLabel, selectedImageContent, brushColor, isSubmitting, imagePath, onBrushColorChange, onSubmitAnnotation }) => {
 
     const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const backgroundCanvasRef = useRef<HTMLCanvasElement | null>(null);

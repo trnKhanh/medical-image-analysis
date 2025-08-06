@@ -5,7 +5,7 @@ import type {
     PseudoLabel,
     ModelCheckpoint,
     LoadingState,
-    ActiveLearningState, SelectedSample, AnnotationData, DiskInfo
+    SelectedSample, AnnotationData, DiskInfo, DatasetState
 } from '../models';
 import { apiService } from '../services/api';
 import { downloadFile } from '../commons/utils.ts';
@@ -21,7 +21,7 @@ export const useApp = () => {
         loaded_feature_only: false
     });
 
-    const [status, setStatus] = useState<ActiveLearningState>({
+    const [datasetState, setDatasetState] = useState<DatasetState>({
         train_count: 0,
         annotated_count: 0,
         pool_count: 0,
@@ -56,12 +56,12 @@ export const useApp = () => {
         setTimeout(() => setSuccess(''), 3000);
     }, []);
 
-    const loadStatus = useCallback(async () => {
+    const loadDatasetState = useCallback(async () => {
         try {
-            const data = await apiService.getStatus();
-            setStatus(data);
+            const data = await apiService.getDatasetState();
+            setDatasetState(data);
         } catch (err) {
-            showError('Failed to load status');
+            showError('Failed to load dataset state');
             console.error(err);
         }
     }, [showError]);
@@ -97,7 +97,7 @@ export const useApp = () => {
             await apiService.updateConfig(newConfig);
             setConfig(newConfig);
             showSuccess('Configuration updated successfully');
-            await loadStatus();
+            await loadDatasetState();
         } catch (err) {
             showError('Failed to update configuration');
             console.error(err);
@@ -105,7 +105,7 @@ export const useApp = () => {
         } finally {
             setLoading(prev => ({ ...prev, config: false }));
         }
-    }, [showSuccess, showError, loadStatus]);
+    }, [showSuccess, showError, loadDatasetState]);
 
     const uploadFiles = useCallback(async (files: FileList, type: 'train' | 'pool') => {
         try {
@@ -114,33 +114,33 @@ export const useApp = () => {
             const result = await apiService.uploadImages(files, type)
 
             showSuccess(result.message);
-            await loadStatus();
+            await loadDatasetState();
         } catch (err) {
             showError(`Failed to upload ${type} files`);
             console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, [type]: false }));
         }
-    }, [showError, showSuccess, loadStatus]);
+    }, [showError, showSuccess, loadDatasetState]);
 
     const selectSamples = useCallback(async () => {
         try {
             setLoading(prev => ({ ...prev, select: true }));
-            if (status.pool_count < config.budget) {
+            if (datasetState.pool_count < config.budget) {
                 showError("Current pool size must greater than budget!");
                 return;
             }
             const result = await apiService.selectSamples();
             setSelectedSamples(result.selected_images);
             showSuccess('Sample selection completed');
-            await loadStatus();
+            await loadDatasetState();
         } catch (err) {
             showError('Failed to select samples');
             console.error(err);
         } finally {
             setLoading(prev => ({ ...prev, select: false }));
         }
-    }, [status, config, showSuccess, loadStatus, showError]);
+    }, [datasetState, config, showSuccess, loadDatasetState, showError]);
 
     const loadPseudoLabel = useCallback(async (imageIndex: number) => {
         try {
@@ -179,7 +179,7 @@ export const useApp = () => {
 
             showSuccess(response.message);
             await loadAnnotatedSamples();
-            await loadStatus();
+            await loadDatasetState();
 
         } catch (err) {
             showError('Failed to submit annotation');
@@ -197,7 +197,7 @@ export const useApp = () => {
             console.log("NEW SELECTED SAMPLES", newSelectedSamples);
             setSelectedSamples(newSelectedSamples);
         }
-    }, [pseudoLabel, selectedImageIndex, showSuccess, loadAnnotatedSamples, loadStatus, showError]);
+    }, [pseudoLabel, selectedImageIndex, showSuccess, loadAnnotatedSamples, loadDatasetState, showError]);
 
     const downloadDataset = useCallback(async () => {
         try {
@@ -227,42 +227,16 @@ export const useApp = () => {
             setPoolFiles(null);
 
             showSuccess('System reset successfully');
-            await loadStatus();
+            await loadDatasetState();
         } catch (err) {
             showError('Failed to reset system');
             console.error(err)
         } finally {
             setLoading((prev: any) => ({ ...prev, reset: false }));
         }
-    }, [showError, showSuccess, loadStatus]);
+    }, [showError, showSuccess, loadDatasetState]);
 
-    const syncSystem = useCallback(async () => {
-        try {
-            setLoading(prev => ({ ...prev, sync: true }));
-            await loadConfig();
-            await loadStatus();
-            await loadAnnotatedSamples();
-            showSuccess('System reset successfully');
-        } catch (error) {
-            showError('Failed to load sync system');
-            console.error(error);
-        } finally {
-            setLoading(prev => ({ ...prev, sync: false }));
-        }
-    }, [showSuccess, loadConfig, loadStatus, loadAnnotatedSamples, showError]);
-
-    const startAnnotation = useCallback((index: number) => {
-        setSelectedImageIndex(index);
-        setIsAnnotating(true);
-        loadPseudoLabel(index).then();
-    }, [loadPseudoLabel]);
-
-    const cancelAnnotation = () => {
-        setIsAnnotating(false);
-        setSelectedImageIndex(null);
-    };
-
-    const loadDiskInfo = useCallback(async () => {
+        const loadDiskInfo = useCallback(async () => {
         setLoadingDiskInfo(true);
         try {
             const info = await apiService.getDiskInfo();
@@ -275,23 +249,50 @@ export const useApp = () => {
         }
     }, []);
 
+    const syncSystem = useCallback(async () => {
+        try {
+            setLoading(prev => ({ ...prev, sync: true }));
+            await loadConfig();
+            await loadDatasetState();
+            await loadAnnotatedSamples();
+            await loadDiskInfo();
+            showSuccess('System reset successfully');
+        } catch (error) {
+            showError('Failed to load sync system');
+            console.error(error);
+        } finally {
+            setLoading(prev => ({ ...prev, sync: false }));
+        }
+    }, [loadConfig, loadDatasetState, loadAnnotatedSamples, loadDiskInfo, showSuccess, showError]);
+
+    const startAnnotation = useCallback((index: number) => {
+        setSelectedImageIndex(index);
+        setIsAnnotating(true);
+        loadPseudoLabel(index).then();
+    }, [loadPseudoLabel]);
+
+    const cancelAnnotation = () => {
+        setIsAnnotating(false);
+        setSelectedImageIndex(null);
+    };
+
     useEffect(() => {
         const interval = setInterval(loadDiskInfo, 30000);
         return () => clearInterval(interval);
     }, [loadDiskInfo]);
 
     useEffect(() => {
-        loadStatus().then();
+        loadDatasetState().then();
         loadConfig().then();
         loadAvailableCheckpoints().then();
         loadAnnotatedSamples().then();
         loadDiskInfo().then();
-    }, [loadStatus, loadConfig, loadAvailableCheckpoints, loadAnnotatedSamples, loadDiskInfo]);
+    }, [loadDatasetState, loadConfig, loadAvailableCheckpoints, loadAnnotatedSamples, loadDiskInfo]);
 
     return {
         // State
         config,
-        status,
+        datasetState,
         trainFiles,
         poolFiles,
         selectedSamples,

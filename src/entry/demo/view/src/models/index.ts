@@ -8,7 +8,7 @@ export interface Config {
     loaded_feature_only: boolean;
 }
 
-export interface ActiveLearningState {
+export interface DatasetState {
     train_count: number;
     pool_count: number;
     annotated_count: number;

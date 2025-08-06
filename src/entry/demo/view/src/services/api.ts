@@ -5,7 +5,7 @@ import type {
     SelectionResponse,
     AnnotatedSample,
     PseudoLabel,
-    ActiveLearningState, AnnotationData, SelectedSample, DiskInfo,
+    DatasetState, AnnotationData, SelectedSample, DiskInfo,
 } from '../models';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -115,8 +115,8 @@ class ApiService {
 
     // ------------------- High‑level convenience methods -----------------------
 
-    getStatus(): Promise<ActiveLearningState> {
-        return this.request<ActiveLearningState>({ url: '/active-learning/state' });
+    getDatasetState(): Promise<DatasetState> {
+        return this.request<DatasetState>({ url: '/dataset/state' });
     }
 
     getConfig(): Promise<Config> {

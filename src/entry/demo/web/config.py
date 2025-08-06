@@ -21,10 +21,10 @@ class Settings(BaseSettings):
 
     # CORS settings
     ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
         "http://localhost:5173",
-        "http://localhost:8080",
+        "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080",
     ]
 
     # Model settings
@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     DATA_DIR: Path = ROOT_DIR / "data"
     MODELS_DIR: Path = ROOT_DIR / "models"
     DATASETS_DIR: Path = ROOT_DIR / "datasets"
+    MAX_SERVER_DATA_SIZE: int = 5 * 1024 * 1024 * 1024
 
     # Device settings
     DEVICE: str = "cpu"
@@ -50,6 +51,7 @@ class Settings(BaseSettings):
     DEFAULT_LOADED_FEATURE_ONLY: bool = False
 
     # File upload settings
+    MAX_WORKSPACE_SIZE: int = 200 * 1024 * 1024 # 200MB
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
     ALLOWED_IMAGE_EXTENSIONS: List[str] = [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]
 

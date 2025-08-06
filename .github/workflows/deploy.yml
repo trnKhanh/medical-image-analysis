@@ -1,0 +1,97 @@
+# .github/workflows/deploy.yml
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ phuphan/demo-multi-user ]
+  pull_request:
+    branches: [ deployment ]
+
+env:
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  EC2_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+  APP_NAME: active-learning-analysis
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/deployment'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Create deployment package
+      run: |
+        tar -czf deployment.tar.gz \
+          --exclude='.git' \
+          --exclude='node_modules' \
+          --exclude='.github' \
+          --exclude='*.log' \
+          .
+
+    - name: Copy files to EC2
+      run: |
+        scp -i ~/.ssh/id_rsa deployment.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/
+
+    - name: Deploy on EC2
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          sudo mkdir -p /opt/${{ env.APP_NAME }}
+          cd /opt/${{ env.APP_NAME }}
+          
+          if [ -f docker-compose.yml ]; then
+            sudo docker-compose down
+          fi
+          
+          sudo tar -xzf /tmp/deployment.tar.gz -C /opt/${{ env.APP_NAME }}
+          sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/${{ env.APP_NAME }}
+          
+          if [ ! -f .env ]; then
+            sudo cp .env.example .env 2>/dev/null || echo "No .env.example found"
+          fi
+          
+          sudo docker-compose pull
+          sudo docker-compose build --no-cache
+          
+          sudo docker-compose up -d
+          
+          rm /tmp/deployment.tar.gz
+          
+          sleep 10
+          sudo docker-compose ps
+          
+          sudo docker-compose logs --tail=50
+        EOF
+
+    - name: Health check
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          sleep 30
+          
+          if sudo docker-compose ps | grep -q "Up"; then
+            echo "Deployment successful - containers are running"
+          else
+            echo "Deployment failed - containers not running"
+            sudo docker-compose logs
+            exit 1
+          fi
+        EOF
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f ~/.ssh/id_rsa

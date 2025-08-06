@@ -17,6 +17,7 @@ api_router.include_router(active_learning_router, prefix="/active-learning")
 api_router.include_router(dataset_router, prefix="/dataset")
 api_router.include_router(models_router, prefix="/models")
 
+
 @api_router.post("/reset")
 def reset(workspace_id: str = Depends(get_workspace)):
     """Reset the API."""

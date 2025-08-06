@@ -1,11 +1,15 @@
 import os
 from logging import Logger, getLogger
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Final
 
 from fastapi import Header, HTTPException, Query
 from starlette.status import HTTP_400_BAD_REQUEST
 
+from entry.demo.web.config import settings
+from utils import get_folder_size
+
 LOGGER: Logger = getLogger(__name__)
+MAX_DISK_SPACE: Final[int] = 5 * 1024 * 1024 * 1024
 
 def get_workspace(
         x_workspace: Annotated[Optional[str], Header()] = None,
@@ -41,3 +45,9 @@ def get_workspace_path(workspace_id: str) -> str:
     os.makedirs(workspace_path, exist_ok=True)
 
     return workspace_path
+
+def validate_disk_space() -> bool:
+    current_disk_size = get_folder_size(settings.DATA_DIR)
+    if current_disk_size > settings.MAX_SERVER_DATA_SIZE:
+        return False
+    return True

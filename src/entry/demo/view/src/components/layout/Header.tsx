@@ -2,14 +2,15 @@ import React from 'react';
 import { Button, Space } from 'antd';
 import { ReloadOutlined, LoadingOutlined, DatabaseOutlined, SyncOutlined } from '@ant-design/icons';
 import { Brain } from 'lucide-react';
-import type { ActiveLearningState } from '../../models';
+import type { DatasetState } from '../../models';
 
 interface HeaderProps {
-    status: ActiveLearningState;
+    status: DatasetState;
     onReset: () => void;
     isResetting: boolean;
     onSync: () => void;
     isSyncing: boolean;
+    extraActions?: React.ReactNode;
 }
 
 export const Header: React.FC<HeaderProps> = ({

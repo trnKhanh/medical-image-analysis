@@ -119,6 +119,10 @@ class DatasetService:
             successful_uploads = []
             failed_uploads = []
 
+            currentSize = self.get_workspace_disk_state(workspace_id)["total_size"]
+            if currentSize is None:
+                raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get workspace disk state")
+
             for uploaded_file in request.images:
                 try:
                     image_content = await uploaded_file.read()
@@ -140,7 +144,15 @@ class DatasetService:
                             "error": f"Unsupported image format: {file_extension}"
                         })
                         continue
-
+                    currentSize = currentSize + len(image_content)
+                    if currentSize > settings.MAX_WORKSPACE_SIZE:
+                        failed_uploads.append({
+                            "filename": uploaded_file.filename,
+                            "error": "Server data size limit exceeded"
+                        })
+                        continue
+                    if currentSize > settings.MAX_WORKSPACE_SIZE:
+                        raise HTTPException(status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail="Server data size limit exceeded")
                     if len(image_content) > settings.MAX_UPLOAD_SIZE:
                         failed_uploads.append({
                             "filename": uploaded_file.filename,
@@ -252,15 +264,15 @@ class DatasetService:
                 detail=f"Export failed for workspace {workspace_id}: {str(e)}"
             )
 
-    def get_workspace_stats(self, workspace_id: str) -> dict:
+    def get_dataset_state(self, workspace_id: str) -> dict:
         """Get statistics for workspace."""
         dirs = self._get_workspace_dirs(workspace_id)
 
         stats = {}
         directory_mapping = {
-            'train_images': dirs.train_images_dir,
-            'pool_images': dirs.pool_images_dir,
-            'annotated_images': dirs.annotated_image_dir,
+            'train': dirs.train_images_dir,
+            'pool': dirs.pool_images_dir,
+            'annotated': dirs.annotated_image_dir,
             'annotated_labels': dirs.annotated_label_dir,
             'archives': dirs.data_archive_dir
         }
@@ -271,7 +283,6 @@ class DatasetService:
                 stats[f'{name}_count'] = file_count
             else:
                 stats[f'{name}_count'] = 0
-
         return stats
 
     def list_images(self, workspace_id: str, image_type: str = "all") -> dict:
@@ -313,9 +324,9 @@ class DatasetService:
             'total_size': total_size,
             'total_size_mb': round(total_size / (1024 * 1024), 2),
             'file_count': file_count,
-            'max_size': (100 * 1024 * 1024),
-            'max_size_mb': 100,
-            'usage_percent': total_size / (100 * 1024 * 1024) if total_size < (100 * 1024 * 1024) else 100,
+            'max_size': settings.MAX_WORKSPACE_SIZE,
+            'max_size_mb': settings.MAX_WORKSPACE_SIZE / (1024 * 1024),
+            'usage_percent': total_size / settings.MAX_WORKSPACE_SIZE if total_size < (settings.MAX_WORKSPACE_SIZE) else 100,
         }
 
     def clear(self, workspace_id: str):
@@ -375,7 +386,7 @@ class DatasetService:
         with self._lock:
             stats = {}
             for workspace_id in self._workspace_dirs.keys():
-                stats[workspace_id] = self.get_workspace_stats(workspace_id)
+                stats[workspace_id] = self.get_dataset_state(workspace_id)
             return stats
 
     @contextmanager

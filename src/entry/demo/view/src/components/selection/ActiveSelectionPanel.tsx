@@ -7,11 +7,11 @@ import {
     EditOutlined
 } from '@ant-design/icons';
 import { Brain } from 'lucide-react';
-import type {ActiveLearningState, SelectedSample} from '../../models';
+import type {DatasetState, SelectedSample} from '../../models';
 
 interface ActiveSelectionPanelProps {
     selectedSamples: SelectedSample[];
-    status: ActiveLearningState;
+    status: DatasetState;
     isSelecting: boolean;
     onSelectSamples: () => void;
     onStartAnnotation: (index: number) => void;

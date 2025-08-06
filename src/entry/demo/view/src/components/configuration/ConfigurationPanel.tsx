@@ -33,11 +33,6 @@ export const ConfigurationPanel = forwardRef<ConfigurationPanelRef, Configuratio
     useEffect(() => {
         setLocalConfig(config);
         setHasChanges(false);
-        console.log("Full config object:", config);
-        console.log("Config keys:", Object.keys(config));
-        console.log("MODEL", config.model_ckpt);
-        console.log("DEVICE", config.device);
-
         form.setFieldsValue({
             model_ckpt: config.model_ckpt,
             device: config.device,

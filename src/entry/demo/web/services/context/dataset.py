@@ -1,5 +1,3 @@
-from fastapi import UploadFile
-
 from entry.demo.web.models.requests import ImageUploadRequest
 from entry.demo.web.models.responses import (DatasetExportResponse,
                                              ImageUploadResponse)
@@ -22,8 +20,8 @@ class DatasetContext:
     async def export_dataset(self, use_memory: bool = False) -> DatasetExportResponse:
         return await self._service.export_dataset(self._workspace_id, use_memory)
 
-    def get_stats(self) -> dict:
-        return self._service.get_workspace_stats(self._workspace_id)
+    def get_dataset_state(self) -> dict:
+        return self._service.get_dataset_state(self._workspace_id)
 
     def get_size(self) -> int:
         return self._service.get_workspace_disk_state(self._workspace_id)
