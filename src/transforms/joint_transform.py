@@ -7,22 +7,35 @@ from torchvision.transforms import functional as F
 from PIL import Image
 
 from .common import image_to_tensor, BaseTransform
+from utils import zoom_image
+
 
 class JointResize(BaseTransform):
-    def __init__(self, image_size: Tuple[int, int] | int):
+    def __init__(
+        self, image_size: Tuple[int, int] | int, use_torchvision: bool = True
+    ):
         if isinstance(image_size, int):
             image_size = (image_size, image_size)
 
         if len(image_size) < 2:
             image_size = image_size * 2
         self.image_size = list(image_size)
+        self.use_torchvision = use_torchvision
 
     def __call__(self, data: dict) -> dict:
         image = image_to_tensor(data["image"])
         label = image_to_tensor(data["label"])
 
-        image = F.resize(image, self.image_size, F.InterpolationMode.BILINEAR)
-        label = F.resize(label, self.image_size, F.InterpolationMode.NEAREST)
+        if self.use_torchvision:
+            image = F.resize(
+                image, self.image_size, F.InterpolationMode.BILINEAR
+            )
+            label = F.resize(
+                label, self.image_size, F.InterpolationMode.NEAREST
+            )
+        else:
+            image = zoom_image(image, self.image_size, order=3)
+            label = zoom_image(label, self.image_size, order=0)
 
         data["image"] = image
         data["label"] = label
@@ -33,9 +46,11 @@ class JointResize(BaseTransform):
         params_dict = {
             JointResize.__name__: {
                 "image_size": self.image_size,
+                "use_torchvision": self.use_torchvision,
             }
         }
         return params_dict
+
 
 class RandomRotation90(BaseTransform):
     def __init__(self, axes: Tuple[int, int] = (-2, -1)):
@@ -63,6 +78,7 @@ class RandomRotation90(BaseTransform):
             }
         }
         return params_dict
+
 
 class MirrorTransform(BaseTransform):
     def __init__(self, axes: int | Tuple[int, ...]):
@@ -200,7 +216,7 @@ class RandomAffine(BaseTransform):
                 "degrees": self.degrees,
                 "translate": self.translate,
                 "scale": self.scale,
-                "shear": self.shear
+                "shear": self.shear,
             }
         }
         return params_dict

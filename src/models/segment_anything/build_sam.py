@@ -94,6 +94,7 @@ def build_sam_vit_b_dualmask_same_prompt_class_random_large(
     dropout_rate=0.0,
     num_points_prompt=(1, 2),
     bbox_change_rate=(0.1, 0.2),
+    num_decoders=3,
 ):
     return _build_sam_dualmask_same_prompt_class_random_large(
         encoder_embed_dim=768,
@@ -109,6 +110,7 @@ def build_sam_vit_b_dualmask_same_prompt_class_random_large(
         dropout_rate=dropout_rate,
         num_points_prompt=num_points_prompt,
         bbox_change_rate=bbox_change_rate,
+        num_decoders=num_decoders,
     )
 
 
@@ -134,6 +136,7 @@ def _build_sam_dualmask_same_prompt_class_random_large(
     dropout_rate=0.0,
     num_points_prompt=(1, 2),
     bbox_change_rate=(0.1, 0.2),
+    num_decoders=3,
 ):
     prompt_embed_dim = 256
     image_size = image_size
@@ -173,33 +176,8 @@ def _build_sam_dualmask_same_prompt_class_random_large(
                 transformer_dim=prompt_embed_dim,
                 iou_head_depth=3,
                 iou_head_hidden_dim=256,
-            ),
-            MaskDecoder_prompt_large(
-                # num_multimask_outputs=3,
-                num_multimask_outputs=num_classes,
-                transformer=TwoWayTransformer(
-                    depth=2,
-                    embedding_dim=prompt_embed_dim,
-                    mlp_dim=2048,
-                    num_heads=8,
-                ),
-                transformer_dim=prompt_embed_dim,
-                iou_head_depth=3,
-                iou_head_hidden_dim=256,
-            ),
-            MaskDecoder_prompt_large(
-                # num_multimask_outputs=3,
-                num_multimask_outputs=num_classes,
-                transformer=TwoWayTransformer(
-                    depth=2,
-                    embedding_dim=prompt_embed_dim,
-                    mlp_dim=2048,
-                    num_heads=8,
-                ),
-                transformer_dim=prompt_embed_dim,
-                iou_head_depth=3,
-                iou_head_hidden_dim=256,
-            ),
+            )
+            for _ in range(num_decoders)
         ],
         # pixel_mean=[123.675, 116.28, 103.53],
         # pixel_std=[58.395, 57.12, 57.375],

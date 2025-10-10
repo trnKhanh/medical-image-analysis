@@ -8,13 +8,17 @@ def parse_args():
 
     parser.add_argument("--work-path", default=".", type=str)
     parser.add_argument("--device", default="cuda", type=str)
+    parser.add_argument(
+        "--no-deterministic", dest="deterministic", action="store_false"
+    )
     parser.add_argument("--seed", default=1337, type=int)
     parser.add_argument("--test-only", action="store_true")
 
     # >>> Model parameters
     parser.add_argument("--num-classes", default=3, type=int)
-    parser.add_argument("--patch-size", default=512, nargs="+", type=int)
-    parser.add_argument("--image-size", default=512, nargs="+", type=int)
+    parser.add_argument("--num-decoders", default=3, type=int)
+    parser.add_argument("--patch-size", default=512, type=int)
+    parser.add_argument("--image-size", default=512, type=int)
     parser.add_argument(
         "--sam-name",
         default="vit_b_dualmask_same_prompt_class_random_large",
@@ -46,7 +50,7 @@ def parse_args():
     # <<< Data parameters
 
     # >>> Training parameters
-    parser.add_argument("--optimizer", default="adam", type=str)
+    parser.add_argument("--optimizer", default="adamw", type=str)
     parser.add_argument("--num-epochs", default=10000, type=int)
     parser.add_argument("--min-iter", default=10000, type=int)
     parser.add_argument("--warmup-iter", default=5000, type=int)
@@ -57,6 +61,8 @@ def parse_args():
     parser.add_argument("--valid-freq-iter", default=200, type=int)
     parser.add_argument("--save-metric", default="dice", type=str)
     parser.add_argument("--loss", default="dice+ce", type=str)
+    parser.add_argument("--dice-batch", action="store_true")
+    parser.add_argument("--dice-squared", action="store_true")
     parser.add_argument("--dice-weight", default=0.8, type=float)
     parser.add_argument("--loss2-weight", default=1.0, type=float)
     parser.add_argument("--loss2-weight-rampup-iter", default=0, type=int)
@@ -101,18 +107,20 @@ def train_entry():
     loss = args_dict.pop("loss")
     save_metric = args_dict.pop("save_metric")
 
+    args_dict["optimizer_name"] = optimizer
+    args_dict["optimizer_kwargs"] = {}
+    args_dict["lr_scheduler_name"] = lr_scheduler
+    args_dict["loss_name"] = loss
+    args_dict["save_metric_name"] = save_metric
+
     trainer = CPCSAMTrainer(
         config=args_dict,
-        optimizer_name=optimizer,
-        optimizer_kwargs={},
-        lr_scheduler_name=lr_scheduler,
-        loss_name=loss,
-        save_metric_name=save_metric,
         **args_dict,
     )
     trainer.initialize()
 
     if test_only:
+        trainer._perform_real_test()
         trainer.perform_real_test()
     else:
         trainer.run_training()
